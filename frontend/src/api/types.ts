@@ -143,6 +143,136 @@ export interface OmnivitaCodeEvaluationResponse {
   character?: CharacterSheet | null;
 }
 
+export type TabletopMode = 'build' | 'session';
+export type MapLayerKey = 'floor' | 'walls' | 'objects' | 'decoration' | 'lighting' | 'collision' | 'fog' | 'notes' | 'tokens';
+export type MapTool = 'select' | 'brush' | 'wall' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'token';
+export type MapObjectKind = 'prop' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
+export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
+
+export interface Asset {
+  id: string;
+  name: string;
+  kind: MapObjectKind | 'floor' | 'wall' | 'fog';
+  color: string;
+  stroke?: string;
+  icon?: string;
+  tags?: string[];
+}
+
+export interface Tileset {
+  id: string;
+  name: string;
+  assets: Asset[];
+}
+
+export interface TileCell {
+  x: number;
+  y: number;
+  assetId: string;
+  rotation?: number;
+}
+
+export interface TileLayer {
+  id: string;
+  name: string;
+  key: MapLayerKey;
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+  cells: TileCell[];
+}
+
+export interface LightSource {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  intensity: number;
+  color: string;
+}
+
+export interface MapObject {
+  id: string;
+  kind: MapObjectKind;
+  name: string;
+  assetId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  visibleToPlayers: boolean;
+  locked: boolean;
+  color?: string;
+  note?: string;
+  light?: LightSource;
+}
+
+export interface ObjectLayer {
+  id: string;
+  name: string;
+  key: MapLayerKey;
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+  objects: MapObject[];
+}
+
+export interface FogLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+  revealedCells: Array<{ x: number; y: number }>;
+}
+
+export interface TabletopToken {
+  id: string;
+  sourceId: string;
+  kind: TabletopTokenKind;
+  name: string;
+  image?: string;
+  x: number;
+  y: number;
+  hpCurrent?: number;
+  hpMax?: number;
+  visibleToPlayers: boolean;
+  locked: boolean;
+}
+
+export interface OmniMap {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  gridSize: number;
+  mode: TabletopMode;
+  activeLayer: MapLayerKey;
+  tilesets: Tileset[];
+  tileLayers: Record<'floor' | 'walls' | 'collision', TileLayer>;
+  objectLayer: ObjectLayer;
+  decorationLayer: ObjectLayer;
+  lightingLayer: ObjectLayer;
+  notesLayer: ObjectLayer;
+  fogLayer: FogLayer;
+  tokens: TabletopToken[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MapSummary {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  gridSize: number;
+  mode: TabletopMode;
+  tokens: number;
+  objects: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface ApiError extends Error {
   status?: number;
   payload?: unknown;

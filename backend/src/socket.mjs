@@ -65,6 +65,22 @@ export function attachSocketServer(httpServer) {
           sentAt: new Date().toISOString()
         });
       });
+    },
+    broadcastMapState(map, meta = {}) {
+      io.sockets.sockets.forEach((socket) => {
+        socket.emit('tabletop:map', {
+          map,
+          meta,
+          sentAt: new Date().toISOString()
+        });
+      });
+    },
+    broadcastMapDeleted(mapId, meta = {}) {
+      io.emit('tabletop:map-deleted', {
+        mapId,
+        meta,
+        sentAt: new Date().toISOString()
+      });
     }
   };
 }

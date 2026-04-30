@@ -5,6 +5,8 @@ import type {
   CharacterSheet,
   CombatState,
   MasterData,
+  MapSummary,
+  OmniMap,
   OmnivitaCodeEvaluationResponse
 } from './types';
 import { clearStoredSession, readStoredSession } from '../auth/session';
@@ -151,6 +153,31 @@ export const api = {
       method: 'POST',
       body: { trail },
       timeoutMs: 12000
+    });
+  },
+  listMaps() {
+    return apiRequest<{ maps: MapSummary[] }>('/api/maps');
+  },
+  getMap(mapId: string) {
+    return apiRequest<{ map: OmniMap }>(`/api/maps/${encodeURIComponent(mapId)}`);
+  },
+  createMap(map: OmniMap) {
+    return apiRequest<{ map: OmniMap }>('/api/maps', {
+      method: 'POST',
+      body: { map },
+      timeoutMs: 30000
+    });
+  },
+  updateMap(mapId: string, map: OmniMap) {
+    return apiRequest<{ map: OmniMap }>(`/api/maps/${encodeURIComponent(mapId)}`, {
+      method: 'PUT',
+      body: { map },
+      timeoutMs: 30000
+    });
+  },
+  deleteMap(mapId: string) {
+    return apiRequest<{ ok: boolean }>(`/api/maps/${encodeURIComponent(mapId)}`, {
+      method: 'DELETE'
     });
   }
 };

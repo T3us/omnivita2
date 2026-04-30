@@ -1,66 +1,51 @@
-export const TABLETOP_TILE_SIZE = 32;
-export const TABLETOP_DEFAULT_WIDTH = 30;
-export const TABLETOP_DEFAULT_HEIGHT = 22;
+import type {
+  Asset,
+  FogLayer,
+  LightSource,
+  MapLayerKey,
+  MapObject,
+  MapObjectKind,
+  MapSummary,
+  MapTool,
+  ObjectLayer,
+  OmniMap,
+  TabletopMode,
+  TabletopToken,
+  TabletopTokenKind,
+  TileCell,
+  TileLayer,
+  Tileset
+} from '../../api/types';
 
-export type TabletopMode = 'view' | 'edit';
-export type TabletopLayerKey = 'ground' | 'objects' | 'collision';
-export type TabletopTokenKind = 'player' | 'npc' | 'enemy';
+export type {
+  Asset,
+  FogLayer,
+  LightSource,
+  MapLayerKey,
+  MapObject,
+  MapObjectKind,
+  MapSummary,
+  MapTool,
+  ObjectLayer,
+  OmniMap,
+  TabletopMode,
+  TabletopToken,
+  TabletopTokenKind,
+  TileCell,
+  TileLayer,
+  Tileset
+};
 
-export interface TabletopTileDefinition {
+export type TileLayerKey = 'floor' | 'walls' | 'collision';
+export type ObjectLayerKey = 'objects' | 'decoration' | 'lighting' | 'notes';
+
+export interface AvailableTabletopToken {
   id: string;
-  name: string;
-  tileset: string;
-  layer: Exclude<TabletopLayerKey, 'collision'>;
-  colors: [string, string, string];
-  pattern: 'flat' | 'grass' | 'stone' | 'wood' | 'water' | 'wall' | 'object' | 'roof' | 'custom';
-  blocksMovement?: boolean;
-  imageSrc?: string;
-}
-
-export interface TabletopTileset {
-  id: string;
-  name: string;
-  tiles: TabletopTileDefinition[];
-}
-
-export interface TabletopLayers {
-  ground: string[][];
-  objects: (string | null)[][];
-  collision: boolean[][];
-}
-
-export interface TabletopToken {
-  id: string;
-  npcId: string;
-  x: number;
-  y: number;
-  name: string;
-  hp: number;
-  maxHp: number;
-  image: string;
+  sourceId: string;
   kind: TabletopTokenKind;
-}
-
-export interface TabletopAvailableToken {
-  npcId: string;
   name: string;
-  hp: number;
-  maxHp: number;
-  image: string;
-  kind: TabletopTokenKind;
+  image?: string;
+  hpCurrent?: number;
+  hpMax?: number;
+  subtitle?: string;
 }
-
-export interface TabletopMapState {
-  version: 1;
-  id: string;
-  name: string;
-  gridWidth: number;
-  gridHeight: number;
-  tileSize: number;
-  layers: TabletopLayers;
-  tokens: TabletopToken[];
-  customTiles: TabletopTileDefinition[];
-  updatedAt: string;
-}
-
-export const TABLETOP_ERASER_TILE = '__eraser__';

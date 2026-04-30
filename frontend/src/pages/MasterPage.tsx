@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import type { ChangeEvent, ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { BootstrapPayload, CharacterSheet, Combatant, CombatState, CompanionSheet, ScenarioState } from '../api/types';
 import { useAuth } from '../auth/auth-context';
 import { AppLayout } from '../components/AppLayout';
-import { TabletopPage } from '../components/tabletop/TabletopPage';
 import { Badge, Button, Card, ResourceMeter } from '../components/Ui';
 import { useBootstrap } from '../hooks/useBootstrap';
 import {
@@ -32,6 +31,8 @@ import {
 } from '../domain/omnivita';
 import { optimizeCharacterImages, readFileAsOptimizedDataUrl } from '../utils/images';
 import { downloadJson, readJsonFile } from '../utils/json';
+
+const TabletopPage = lazy(() => import('../components/tabletop/TabletopPage').then((module) => ({ default: module.TabletopPage })));
 
 type QuickFilter = 'all' | 'alert' | 'instability' | 'entities' | 'absent' | 'focus';
 type MasterTab = 'session' | 'combat' | 'players' | 'omnivita' | 'tabletop' | 'scenarios' | 'libraries' | 'editor';
@@ -732,10 +733,12 @@ export function MasterPage() {
           />
         ) : null}
         {activeTab === 'tabletop' ? (
-          <TabletopPage
-            characters={characters}
-            combatants={currentCombatants}
-          />
+          <Suspense fallback={<Card>Carregando mesa...</Card>}>
+            <TabletopPage
+              characters={characters}
+              combatants={currentCombatants}
+            />
+          </Suspense>
         ) : null}
         {activeTab === 'scenarios' ? (
           <ScenariosPanel

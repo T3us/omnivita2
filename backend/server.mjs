@@ -7,6 +7,7 @@ import registerAuthRoutes from './src/routes/auth.mjs';
 import registerBootstrapRoutes from './src/routes/bootstrap.mjs';
 import registerCharacterRoutes from './src/routes/characters.mjs';
 import registerCombatRoutes from './src/routes/combat.mjs';
+import registerMapRoutes from './src/routes/maps.mjs';
 import registerMasterDataRoutes from './src/routes/master-data.mjs';
 import registerOmnivitaRoutes from './src/routes/omnivita.mjs';
 
@@ -16,7 +17,9 @@ const app = Fastify({
 });
 
 const services = {
-  broadcastCombatState() {}
+  broadcastCombatState() {},
+  broadcastMapState() {},
+  broadcastMapDeleted() {}
 };
 
 await app.register(cors, {
@@ -65,11 +68,14 @@ await registerAuthRoutes(app, { services });
 await registerBootstrapRoutes(app, { services });
 await registerCharacterRoutes(app, { services });
 await registerCombatRoutes(app, { services });
+await registerMapRoutes(app, { services });
 await registerMasterDataRoutes(app, { services });
 await registerOmnivitaRoutes(app, { services });
 
 const sockets = attachSocketServer(app.server);
 services.broadcastCombatState = sockets.broadcastCombatState;
+services.broadcastMapState = sockets.broadcastMapState;
+services.broadcastMapDeleted = sockets.broadcastMapDeleted;
 
 try {
   await app.listen({

@@ -1,311 +1,318 @@
 import { create } from 'zustand';
-import type { TabletopAvailableToken, TabletopLayerKey, TabletopMapState, TabletopMode, TabletopTileDefinition, TabletopToken } from './types';
-import { TABLETOP_DEFAULT_HEIGHT, TABLETOP_DEFAULT_WIDTH, TABLETOP_ERASER_TILE, TABLETOP_TILE_SIZE } from './types';
-import { getTileDefinition } from './tilesets';
+import { buildMapObject, cloneMap, createBlankMap, createId, normalizeMap, removeTileCell, setTileCell } from './mapFactory';
+import type {
+  AvailableTabletopToken,
+  MapLayerKey,
+  MapObject,
+  MapTool,
+  OmniMap,
+  TabletopMode,
+  TabletopToken
+} from './types';
 
-type TabletopStore = TabletopMapState & {
-  currentMode: TabletopMode;
-  selectedTile: string;
-  currentTileset: string;
-  activeLayer: TabletopLayerKey;
+interface TabletopStore {
+  map: OmniMap;
+  tool: MapTool;
+  selectedAssetId: string;
+  selectedObjectId: string;
+  selectedTokenId: string;
+  zoom: number;
+  dirty: boolean;
+  setMap(map: Partial<OmniMap>): void;
+  newMap(name: string, width: number, height: number, gridSize: number): void;
+  setMapMeta(patch: Pick<OmniMap, 'name' | 'width' | 'height' | 'gridSize'>): void;
   setMode(mode: TabletopMode): void;
-  setMapName(name: string): void;
-  setSelectedTile(tileId: string): void;
-  setCurrentTileset(tileset: string): void;
-  setActiveLayer(layer: TabletopLayerKey): void;
-  paintCell(x: number, y: number): void;
-  eraseCell(x: number, y: number): void;
-  addToken(source: TabletopAvailableToken, x: number, y: number): void;
+  setTool(tool: MapTool): void;
+  setActiveLayer(layer: MapLayerKey): void;
+  setSelectedAsset(assetId: string): void;
+  setZoom(zoom: number): void;
+  clearDirty(): void;
+  paintCell(x: number, y: number, layer?: MapLayerKey, assetId?: string): void;
+  eraseAt(x: number, y: number): void;
+  addObject(assetId: string, x: number, y: number): void;
+  updateObject(objectId: string, patch: Partial<MapObject>): void;
+  removeObject(objectId: string): void;
+  selectObject(objectId: string): void;
+  addToken(source: AvailableTabletopToken, x: number, y: number): void;
   moveToken(tokenId: string, x: number, y: number): void;
+  updateToken(tokenId: string, patch: Partial<TabletopToken>): void;
   removeToken(tokenId: string): void;
-  updateTokenHp(tokenId: string, hp: number): void;
-  addCustomTile(tile: Omit<TabletopTileDefinition, 'id' | 'tileset' | 'pattern'> & { imageSrc: string }): void;
-  newMap(name?: string, width?: number, height?: number): void;
-  setMap(map: TabletopMapState): void;
-};
+  selectToken(tokenId: string): void;
+  setLayerVisibility(layer: MapLayerKey, visible: boolean): void;
+  setLayerLocked(layer: MapLayerKey, locked: boolean): void;
+  setLayerOpacity(layer: MapLayerKey, opacity: number): void;
+  revealFogCell(x: number, y: number): void;
+  hideFogCell(x: number, y: number): void;
+}
 
 export const useTabletopStore = create<TabletopStore>((set, get) => ({
-  ...createDefaultTabletopMap('Mapa de teste'),
-  currentMode: 'view',
-  selectedTile: 'forest.grass',
-  currentTileset: 'forest',
-  activeLayer: 'ground',
+  map: createBlankMap('Mapa da sessao'),
+  tool: 'brush',
+  selectedAssetId: 'floor-grass',
+  selectedObjectId: '',
+  selectedTokenId: '',
+  zoom: 1,
+  dirty: false,
 
-  setMode: (mode) => set({ currentMode: mode }),
-  setMapName: (name) => set({ name, updatedAt: new Date().toISOString() }),
-  setSelectedTile: (tileId) => set({ selectedTile: tileId }),
-  setCurrentTileset: (tileset) => set({ currentTileset: tileset }),
-  setActiveLayer: (layer) => set({ activeLayer: layer }),
-
-  paintCell: (x, y) => {
-    const state = get();
-    if (!isInside(state, x, y)) return;
-    if (state.selectedTile === TABLETOP_ERASER_TILE) {
-      get().eraseCell(x, y);
-      return;
-    }
-
-    const layers = cloneLayers(state.layers);
-    if (state.activeLayer === 'collision') {
-      layers.collision[y][x] = true;
-    } else if (state.activeLayer === 'objects') {
-      layers.objects[y][x] = state.selectedTile;
-    } else {
-      layers.ground[y][x] = state.selectedTile;
-    }
-    const tile = getTileDefinition(state.selectedTile, state.customTiles);
-    if (tile?.blocksMovement) layers.collision[y][x] = true;
-    set({ layers, updatedAt: new Date().toISOString() });
-  },
-
-  eraseCell: (x, y) => {
-    const state = get();
-    if (!isInside(state, x, y)) return;
-    const layers = cloneLayers(state.layers);
-    if (state.activeLayer === 'collision') {
-      layers.collision[y][x] = false;
-    } else if (state.activeLayer === 'objects') {
-      layers.objects[y][x] = null;
-    } else {
-      layers.ground[y][x] = 'forest.grass';
-    }
-    set({ layers, updatedAt: new Date().toISOString() });
-  },
-
-  addToken: (source, x, y) => {
-    const state = get();
-    const safe = clampCell(state, x, y);
-    if (state.layers.collision[safe.y]?.[safe.x]) return;
-    const token: TabletopToken = {
-      id: `token-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      npcId: source.npcId,
-      x: safe.x,
-      y: safe.y,
-      name: source.name,
-      hp: Number(source.hp || source.maxHp || 1),
-      maxHp: Math.max(1, Number(source.maxHp || source.hp || 1)),
-      image: source.image || '',
-      kind: source.kind
-    };
-    set({ tokens: [...state.tokens, token], updatedAt: new Date().toISOString() });
-  },
-
-  moveToken: (tokenId, x, y) => {
-    const state = get();
-    const safe = clampCell(state, x, y);
-    if (state.layers.collision[safe.y]?.[safe.x]) return;
+  setMap(map) {
     set({
-      tokens: state.tokens.map((token) => token.id === tokenId ? { ...token, x: safe.x, y: safe.y } : token),
-      updatedAt: new Date().toISOString()
+      map: normalizeMap(map),
+      selectedObjectId: '',
+      selectedTokenId: '',
+      dirty: false
     });
   },
 
-  removeToken: (tokenId) => {
-    const state = get();
-    set({ tokens: state.tokens.filter((token) => token.id !== tokenId), updatedAt: new Date().toISOString() });
-  },
-
-  updateTokenHp: (tokenId, hp) => {
-    const state = get();
+  newMap(name, width, height, gridSize) {
     set({
-      tokens: state.tokens.map((token) => token.id === tokenId ? { ...token, hp: Math.max(0, Math.min(token.maxHp, Math.round(Number(hp || 0)))) } : token),
-      updatedAt: new Date().toISOString()
+      map: createBlankMap(name, width, height, gridSize),
+      tool: 'brush',
+      selectedObjectId: '',
+      selectedTokenId: '',
+      dirty: true
     });
   },
 
-  addCustomTile: (tile) => {
-    const id = `custom.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`;
-    const customTile: TabletopTileDefinition = {
-      ...tile,
-      id,
-      tileset: 'custom',
-      pattern: 'custom'
-    };
-    set({
-      customTiles: [...get().customTiles, customTile],
-      currentTileset: 'custom',
-      selectedTile: id,
-      activeLayer: tile.layer,
-      updatedAt: new Date().toISOString()
+  setMapMeta(patch) {
+    set((state) => ({
+      map: normalizeMap({ ...state.map, ...patch }),
+      dirty: true
+    }));
+  },
+
+  setMode(mode) {
+    set((state) => ({ map: { ...state.map, mode }, tool: mode === 'build' ? state.tool : 'token', dirty: true }));
+  },
+
+  setTool(tool) {
+    set({ tool });
+  },
+
+  setActiveLayer(layer) {
+    set((state) => ({ map: { ...state.map, activeLayer: layer }, dirty: true }));
+  },
+
+  setSelectedAsset(assetId) {
+    set({ selectedAssetId: assetId });
+  },
+
+  setZoom(zoom) {
+    set({ zoom: Math.max(0.5, Math.min(2.5, zoom)) });
+  },
+
+  clearDirty() {
+    set({ dirty: false });
+  },
+
+  paintCell(x, y, layer, assetId) {
+    const targetLayer = layer || get().map.activeLayer;
+    const selectedAsset = assetId || get().selectedAssetId;
+    if (!selectedAsset) return;
+    set((state) => {
+      if (!isInside(state.map, x, y)) return state;
+      const next = cloneMap(state.map);
+      if (targetLayer === 'floor' || targetLayer === 'walls' || targetLayer === 'collision') {
+        if (next.tileLayers[targetLayer].locked) return state;
+        next.tileLayers[targetLayer].cells = setTileCell(next.tileLayers[targetLayer].cells, x, y, selectedAsset);
+        return { map: next, dirty: true };
+      }
+      return state;
     });
   },
 
-  newMap: (name = 'Novo mapa', width = TABLETOP_DEFAULT_WIDTH, height = TABLETOP_DEFAULT_HEIGHT) => {
-    set({
-      ...createDefaultTabletopMap(name, width, height),
-      currentMode: 'edit',
-      selectedTile: 'forest.grass',
-      currentTileset: 'forest',
-      activeLayer: 'ground'
+  eraseAt(x, y) {
+    set((state) => {
+      if (!isInside(state.map, x, y)) return state;
+      const next = cloneMap(state.map);
+      const layer = next.activeLayer;
+      if (layer === 'floor' || layer === 'walls' || layer === 'collision') {
+        next.tileLayers[layer].cells = removeTileCell(next.tileLayers[layer].cells, x, y);
+      } else {
+        removeObjectsAt(next, x, y);
+      }
+      return { map: next, dirty: true, selectedObjectId: '', selectedTokenId: '' };
     });
   },
 
-  setMap: (map) => {
-    set({
-      ...normalizeTabletopMap(map),
-      currentMode: 'view',
-      selectedTile: 'forest.grass',
-      currentTileset: 'forest',
-      activeLayer: 'ground'
+  addObject(assetId, x, y) {
+    set((state) => {
+      if (!isInside(state.map, x, y)) return state;
+      const next = cloneMap(state.map);
+      const object = buildMapObject(assetId, x, y);
+      const target = object.kind === 'light'
+        ? next.lightingLayer
+        : object.kind === 'note'
+          ? next.notesLayer
+          : object.kind === 'prop'
+            ? next.decorationLayer
+            : next.objectLayer;
+      if (target.locked) return state;
+      target.objects.push(object);
+      return { map: next, selectedObjectId: object.id, selectedTokenId: '', dirty: true };
     });
+  },
+
+  updateObject(objectId, patch) {
+    set((state) => {
+      const next = cloneMap(state.map);
+      const object = findObject(next, objectId);
+      if (!object) return state;
+      Object.assign(object, patch);
+      if (object.light) {
+        object.light.x = object.x;
+        object.light.y = object.y;
+      }
+      return { map: next, dirty: true };
+    });
+  },
+
+  removeObject(objectId) {
+    set((state) => {
+      const next = cloneMap(state.map);
+      for (const layer of [next.objectLayer, next.decorationLayer, next.lightingLayer, next.notesLayer]) {
+        layer.objects = layer.objects.filter((object) => object.id !== objectId);
+      }
+      return { map: next, selectedObjectId: '', dirty: true };
+    });
+  },
+
+  selectObject(objectId) {
+    set({ selectedObjectId: objectId, selectedTokenId: '' });
+  },
+
+  addToken(source, x, y) {
+    set((state) => {
+      if (!isInside(state.map, x, y)) return state;
+      const next = cloneMap(state.map);
+      const token: TabletopToken = {
+        id: createId('tok'),
+        sourceId: source.sourceId,
+        kind: source.kind,
+        name: source.name,
+        image: source.image,
+        hpCurrent: source.hpCurrent,
+        hpMax: source.hpMax,
+        x,
+        y,
+        visibleToPlayers: true,
+        locked: false
+      };
+      next.tokens.push(token);
+      return { map: next, selectedTokenId: token.id, selectedObjectId: '', dirty: true };
+    });
+  },
+
+  moveToken(tokenId, x, y) {
+    set((state) => {
+      const next = cloneMap(state.map);
+      const token = next.tokens.find((entry) => entry.id === tokenId);
+      if (!token || token.locked) return state;
+      token.x = Math.max(0, Math.min(next.width - 1, Math.round(x)));
+      token.y = Math.max(0, Math.min(next.height - 1, Math.round(y)));
+      return { map: next, dirty: true };
+    });
+  },
+
+  updateToken(tokenId, patch) {
+    set((state) => {
+      const next = cloneMap(state.map);
+      const token = next.tokens.find((entry) => entry.id === tokenId);
+      if (!token) return state;
+      Object.assign(token, patch);
+      return { map: next, dirty: true };
+    });
+  },
+
+  removeToken(tokenId) {
+    set((state) => {
+      const next = cloneMap(state.map);
+      next.tokens = next.tokens.filter((entry) => entry.id !== tokenId);
+      return { map: next, selectedTokenId: '', dirty: true };
+    });
+  },
+
+  selectToken(tokenId) {
+    set({ selectedTokenId: tokenId, selectedObjectId: '' });
+  },
+
+  setLayerVisibility(layer, visible) {
+    set((state) => ({ map: patchLayer(state.map, layer, { visible }), dirty: true }));
+  },
+
+  setLayerLocked(layer, locked) {
+    set((state) => ({ map: patchLayer(state.map, layer, { locked }), dirty: true }));
+  },
+
+  setLayerOpacity(layer, opacity) {
+    set((state) => ({ map: patchLayer(state.map, layer, { opacity: Math.max(0, Math.min(1, opacity)) }), dirty: true }));
+  },
+
+  revealFogCell(x, y) {
+    set((state) => {
+      if (!isInside(state.map, x, y)) return state;
+      const key = `${x}:${y}`;
+      if (state.map.fogLayer.revealedCells.some((cell) => `${cell.x}:${cell.y}` === key)) return state;
+      return {
+        map: {
+          ...state.map,
+          fogLayer: {
+            ...state.map.fogLayer,
+            revealedCells: [...state.map.fogLayer.revealedCells, { x, y }]
+          }
+        },
+        dirty: true
+      };
+    });
+  },
+
+  hideFogCell(x, y) {
+    set((state) => ({
+      map: {
+        ...state.map,
+        fogLayer: {
+          ...state.map.fogLayer,
+          revealedCells: state.map.fogLayer.revealedCells.filter((cell) => cell.x !== x || cell.y !== y)
+        }
+      },
+      dirty: true
+    }));
   }
 }));
 
-export function createDefaultTabletopMap(name = 'Mapa de teste', width = TABLETOP_DEFAULT_WIDTH, height = TABLETOP_DEFAULT_HEIGHT): TabletopMapState {
-  const layers = createEmptyLayers(width, height);
+function isInside(map: OmniMap, x: number, y: number) {
+  return x >= 0 && y >= 0 && x < map.width && y < map.height;
+}
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if ((y >= Math.floor(height / 2) - 1 && y <= Math.floor(height / 2)) || (x === Math.floor(width * 0.62) && y > 4)) {
-        layers.ground[y][x] = 'forest.path';
-      }
-      if ((x > 2 && x < 7 && y > 2 && y < 5) || (x > 20 && y > 1 && y < 6)) {
-        layers.ground[y][x] = 'city.stone';
-      }
-      if (x > 9 && x < 13 && y > 2 && y < 5) {
-        layers.objects[y][x] = y === 3 ? 'city.roof' : 'city.wall';
-        layers.collision[y][x] = true;
-      }
-      if (x > 3 && x < 6 && y > 3 && y < 6) {
-        layers.ground[y][x] = 'forest.water';
-        layers.collision[y][x] = true;
-      }
-      if ((x < 4 && y < 3) || (x > 15 && y < 3) || (x > 6 && x < 10 && y > 15)) {
-        layers.ground[y][x] = 'forest.deep-grass';
-      }
-    }
+function patchLayer(map: OmniMap, layer: MapLayerKey, patch: { visible?: boolean; locked?: boolean; opacity?: number }) {
+  const next = cloneMap(map);
+  if (layer === 'floor' || layer === 'walls' || layer === 'collision') {
+    Object.assign(next.tileLayers[layer], patch);
+  } else if (layer === 'objects') {
+    Object.assign(next.objectLayer, patch);
+  } else if (layer === 'decoration') {
+    Object.assign(next.decorationLayer, patch);
+  } else if (layer === 'lighting') {
+    Object.assign(next.lightingLayer, patch);
+  } else if (layer === 'notes') {
+    Object.assign(next.notesLayer, patch);
+  } else if (layer === 'fog') {
+    Object.assign(next.fogLayer, patch);
   }
-
-  [
-    [1, 1, 'forest.tree'],
-    [2, 1, 'forest.tree'],
-    [18, 1, 'forest.tree'],
-    [19, 1, 'forest.tree'],
-    [7, 5, 'forest.rock'],
-    [10, 8, 'forest.fence'],
-    [11, 8, 'forest.fence'],
-    [16, 7, 'forest.fence'],
-    [5, 10, 'forest.bush'],
-    [24, 8, 'city.light'],
-    [20, 12, 'dungeon.anomaly']
-  ].forEach(([x, y, tileId]) => {
-    if (typeof x !== 'number' || typeof y !== 'number' || typeof tileId !== 'string') return;
-    if (!layers.objects[y]?.[x]) layers.objects[y][x] = tileId;
-    layers.collision[y][x] = tileId !== 'city.light' && tileId !== 'dungeon.anomaly';
-  });
-
-  return {
-    version: 1,
-    id: `map-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    name,
-    gridWidth: width,
-    gridHeight: height,
-    tileSize: TABLETOP_TILE_SIZE,
-    layers,
-    tokens: [],
-    customTiles: [],
-    updatedAt: new Date().toISOString()
-  };
+  return next;
 }
 
-export function normalizeTabletopMap(map: Partial<TabletopMapState>): TabletopMapState {
-  const width = clampDimension(map.gridWidth, TABLETOP_DEFAULT_WIDTH);
-  const height = clampDimension(map.gridHeight, TABLETOP_DEFAULT_HEIGHT);
-  return {
-    version: 1,
-    id: String(map.id || `map-${Date.now()}`),
-    name: String(map.name || 'Mapa sem nome'),
-    gridWidth: width,
-    gridHeight: height,
-    tileSize: Math.max(16, Math.min(64, Math.round(Number(map.tileSize || TABLETOP_TILE_SIZE)))),
-    layers: {
-      ground: normalizeStringGrid(map.layers?.ground, width, height, 'forest.grass'),
-      objects: normalizeNullableGrid(map.layers?.objects, width, height),
-      collision: normalizeBooleanGrid(map.layers?.collision, width, height)
-    },
-    tokens: Array.isArray(map.tokens) ? map.tokens.map(normalizeToken).filter(Boolean) as TabletopToken[] : [],
-    customTiles: Array.isArray(map.customTiles) ? map.customTiles.map(normalizeCustomTile).filter(Boolean) as TabletopTileDefinition[] : [],
-    updatedAt: String(map.updatedAt || new Date().toISOString())
-  };
+function findObject(map: OmniMap, objectId: string) {
+  return [map.objectLayer, map.decorationLayer, map.lightingLayer, map.notesLayer]
+    .flatMap((layer) => layer.objects)
+    .find((object) => object.id === objectId) || null;
 }
 
-function createEmptyLayers(width: number, height: number) {
-  return {
-    ground: Array.from({ length: height }, () => Array.from({ length: width }, () => 'forest.grass')),
-    objects: Array.from({ length: height }, () => Array.from({ length: width }, () => null as string | null)),
-    collision: Array.from({ length: height }, () => Array.from({ length: width }, () => false))
-  };
-}
-
-function cloneLayers(layers: TabletopMapState['layers']) {
-  return {
-    ground: layers.ground.map((row) => row.slice()),
-    objects: layers.objects.map((row) => row.slice()),
-    collision: layers.collision.map((row) => row.slice())
-  };
-}
-
-function isInside(state: Pick<TabletopMapState, 'gridWidth' | 'gridHeight'>, x: number, y: number) {
-  return x >= 0 && y >= 0 && x < state.gridWidth && y < state.gridHeight;
-}
-
-function clampCell(state: Pick<TabletopMapState, 'gridWidth' | 'gridHeight'>, x: number, y: number) {
-  return {
-    x: Math.max(0, Math.min(state.gridWidth - 1, Math.round(Number(x || 0)))),
-    y: Math.max(0, Math.min(state.gridHeight - 1, Math.round(Number(y || 0))))
-  };
-}
-
-function clampDimension(value: unknown, fallback: number) {
-  return Math.max(8, Math.min(100, Math.round(Number(value || fallback))));
-}
-
-function normalizeStringGrid(grid: unknown, width: number, height: number, fallback: string) {
-  return Array.from({ length: height }, (_, y) => (
-    Array.from({ length: width }, (_, x) => String((grid as string[][] | undefined)?.[y]?.[x] || fallback))
-  ));
-}
-
-function normalizeNullableGrid(grid: unknown, width: number, height: number) {
-  return Array.from({ length: height }, (_, y) => (
-    Array.from({ length: width }, (_, x) => {
-      const value = (grid as (string | null)[][] | undefined)?.[y]?.[x];
-      return value ? String(value) : null;
-    })
-  ));
-}
-
-function normalizeBooleanGrid(grid: unknown, width: number, height: number) {
-  return Array.from({ length: height }, (_, y) => (
-    Array.from({ length: width }, (_, x) => Boolean((grid as boolean[][] | undefined)?.[y]?.[x]))
-  ));
-}
-
-function normalizeToken(raw: Partial<TabletopToken>) {
-  if (!raw || typeof raw !== 'object') return null;
-  return {
-    id: String(raw.id || `token-${Date.now()}`),
-    npcId: String(raw.npcId || raw.id || ''),
-    x: Math.max(0, Math.round(Number(raw.x || 0))),
-    y: Math.max(0, Math.round(Number(raw.y || 0))),
-    name: String(raw.name || 'Token'),
-    hp: Math.max(0, Math.round(Number(raw.hp || 1))),
-    maxHp: Math.max(1, Math.round(Number(raw.maxHp || raw.hp || 1))),
-    image: String(raw.image || ''),
-    kind: raw.kind === 'enemy' || raw.kind === 'player' ? raw.kind : 'npc'
-  };
-}
-
-function normalizeCustomTile(raw: Partial<TabletopTileDefinition>) {
-  if (!raw || typeof raw !== 'object' || !raw.imageSrc) return null;
-  return {
-    id: String(raw.id || `custom.${Date.now()}`),
-    name: String(raw.name || 'Tile customizado'),
-    tileset: 'custom',
-    layer: raw.layer === 'objects' ? 'objects' : 'ground',
-    colors: Array.isArray(raw.colors) && raw.colors.length >= 3 ? raw.colors as [string, string, string] : ['#8b5cf6', '#2f164f', '#e9d5ff'],
-    pattern: 'custom' as const,
-    blocksMovement: Boolean(raw.blocksMovement),
-    imageSrc: String(raw.imageSrc)
-  };
+function removeObjectsAt(map: OmniMap, x: number, y: number) {
+  for (const layer of [map.objectLayer, map.decorationLayer, map.lightingLayer, map.notesLayer]) {
+    layer.objects = layer.objects.filter((object) => {
+      const withinX = x >= object.x && x <= object.x + object.width;
+      const withinY = y >= object.y && y <= object.y + object.height;
+      return !(withinX && withinY);
+    });
+  }
 }
