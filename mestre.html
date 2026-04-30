@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniVita // Mestre</title>
+  <link rel="stylesheet" href="assets/css/styles.css?v=57" />
+  <link rel="icon" href="assets/Gemini_Generated_Image_rvnvryrvnvryrvnv.png?v=1" type="image/png" />
+</head>
+<body>
+  <div class="app-shell master-layout">
+    <aside class="sidebar glass-card">
+      <div>
+        <span class="chip">MESTRE</span>
+        <h1>Painel Geral</h1>
+        <p>Visao consolidada das fichas e dos recursos atuais dos jogadores.</p>
+      </div>
+
+      <div class="session-box compact-list">
+        <p><strong>Usuario:</strong> <span id="masterSessionUser">-</span></p>
+        <p><strong>Permissao:</strong> acesso total</p>
+      </div>
+
+      <div class="sidebar-actions">
+        <a class="secondary-button" href="personagem.html">Ir para painel do personagem</a>
+        <button id="masterLogoutButton" class="secondary-button" type="button">Sair</button>
+      </div>
+    </aside>
+
+    <main class="content-area">
+      <header class="page-header glass-card">
+        <div>
+          <span class="chip">DASHBOARD</span>
+          <h2>Fichas da campanha</h2>
+          <p>
+            O painel do mestre mostra recursos atuais, maximos calculados, instabilidade e resumo de cada ficha.
+          </p>
+        </div>
+        <div class="card-actions-row compact-actions">
+          <button id="masterExportAllButton" class="secondary-button small-button" type="button">Exportar todas as fichas</button>
+          <button id="masterImportAllButton" class="secondary-button small-button" type="button">Importar campanha</button>
+          <input id="masterImportAllInput" type="file" accept="application/json,.json" hidden />
+          <button id="masterOptimizeImagesButton" class="secondary-button small-button" type="button">Otimizar imagens</button>
+          <div class="status-pill" id="masterStatus">Ao vivo</div>
+        </div>
+      </header>
+
+      <section class="glass-card tab-shell" aria-label="Seções do painel do mestre">
+        <div class="tab-bar" role="tablist" aria-label="Seções do painel do mestre">
+          <button class="tab-button is-active" type="button" role="tab" aria-selected="true" data-tab="masterSessionTab">Sessão</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="masterCombatTab">Combate</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="masterPlayersTab">Players</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="masterScenariosTab">Cenarios</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="masterEditorTab">Edição</button>
+        </div>
+      </section>
+
+      <div class="tab-panels">
+        <div class="tab-panel is-active" data-panel="masterSessionTab">
+          <section class="glass-card panel-block">
+            <div class="section-title-row">
+              <div>
+                <h3>Panorama da sessao</h3>
+                <p class="subtle">Busca rapida, filtros e sinais de alerta para acompanhar a rodada.</p>
+              </div>
+              <div class="inline-badges">
+                <span class="stat-tag" id="masterVisibleCount">0/0 visiveis</span>
+                <span class="stat-tag" id="masterAlertCount">0 alertas</span>
+              </div>
+            </div>
+            <div class="master-toolbar-grid">
+              <label>
+                Buscar
+                <input id="masterSearchInput" type="search" placeholder="Nome, status, nota ou entidade" />
+              </label>
+              <label>
+                Filtro rapido
+                <select id="masterQuickFilter">
+                  <option value="all">Todos</option>
+                  <option value="alert">Com alerta</option>
+                  <option value="instability">Instabilidade alta</option>
+                  <option value="entities">Com entidades</option>
+                  <option value="absent">Ausentes</option>
+                  <option value="focus">Em foco</option>
+                </select>
+              </label>
+            </div>
+            <div id="masterOverviewSummary" class="cards-grid compact-cards top-gap"></div>
+          </section>
+
+          <div id="masterLogMount"></div>
+        </div>
+
+        <div class="tab-panel" data-panel="masterCombatTab">
+          <section class="glass-card panel-block">
+            <div class="section-title-row">
+              <div>
+                <h3>Gerador de inimigos</h3>
+                <p class="subtle">Sugestoes de encontro baseadas nas fichas selecionadas, no nivel real do grupo e no ritmo do sistema.</p>
+              </div>
+              <button id="masterEncounterCopyButton" class="secondary-button small-button" type="button">Copiar bloco</button>
+            </div>
+            <div class="master-encounter-grid">
+              <article class="info-card compact-entity-section master-encounter-planner">
+                <div class="form-grid two-columns">
+                  <label>
+                    Formato do encontro
+                    <select id="masterEncounterType">
+                      <option value="swarm">Varios fracos</option>
+                      <option value="skirmish">Grupo equilibrado</option>
+                      <option value="elite">Elites</option>
+                      <option value="boss">Boss</option>
+                    </select>
+                  </label>
+                  <label>
+                    Pressao
+                    <select id="masterEncounterPressure">
+                      <option value="light">Leve</option>
+                      <option value="balanced">Equilibrada</option>
+                      <option value="heavy">Pesada</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="minor-title-row top-gap-small">
+                  <h4>Participantes</h4>
+                  <div class="card-actions-row compact-actions">
+                    <button id="masterEncounterSelectPresentButton" class="secondary-button small-button" type="button">Presentes</button>
+                    <button id="masterEncounterSelectVisibleButton" class="secondary-button small-button" type="button">Visiveis</button>
+                    <button id="masterEncounterSelectAllButton" class="secondary-button small-button" type="button">Todos</button>
+                  </div>
+                </div>
+                <div id="masterEncounterParticipants" class="master-encounter-participants top-gap-small"></div>
+                <p class="subtle top-gap-small">As sugestoes usam PV, PE, PD, defesa, bloqueio e ofensiva media das fichas marcadas.</p>
+              </article>
+
+              <div class="stack-list master-encounter-summary-column">
+                <div id="masterEncounterSummary" class="cards-grid compact-cards"></div>
+                <label class="master-encounter-block-card">
+                  Bloco rapido
+                  <textarea id="masterEncounterBlock" rows="8" readonly></textarea>
+                </label>
+              </div>
+
+              <div id="masterEncounterOutput" class="stack-list master-encounter-output"></div>
+            </div>
+          </section>
+
+          <section class="glass-card panel-block">
+            <div class="section-title-row">
+              <div>
+                <h3>Biblioteca de inimigos</h3>
+                <p class="subtle">Fichas salvas a partir do gerador ou criadas manualmente para reutilizar em outras cenas.</p>
+              </div>
+              <div class="inline-badges">
+                <span class="stat-tag" id="masterEnemyLibraryCount">0 fichas</span>
+                <button id="masterNewEnemyButton" class="secondary-button small-button" type="button">Novo inimigo</button>
+              </div>
+            </div>
+            <div id="masterEnemyLibraryList" class="cards-grid compact-cards"></div>
+          </section>
+
+          <section class="glass-card panel-block">
+            <div class="section-title-row">
+              <div>
+                <h3>Encontro ativo</h3>
+                <p class="subtle">Ordem manual de combate com players, mini-fichas e inimigos na mesma fila.</p>
+              </div>
+              <div class="inline-badges">
+                <span class="stat-tag" id="masterActiveEncounterCount">0 em cena</span>
+                <span class="stat-tag" id="masterActiveEncounterPv">0 PV restantes</span>
+                <button id="masterAddPresentPlayersButton" class="secondary-button small-button" type="button">Adicionar presentes</button>
+                <button id="masterAddVisiblePlayersButton" class="secondary-button small-button" type="button">Adicionar visiveis</button>
+                <button id="masterPassTurnButton" class="secondary-button small-button" type="button">Passar vez</button>
+                <button id="masterResetTurnButton" class="secondary-button small-button" type="button">Reiniciar rodada</button>
+                <button id="masterSortActiveEncounterButton" class="secondary-button small-button" type="button">Ordenar iniciativa</button>
+                <button id="masterClearActiveEncounterButton" class="secondary-button small-button" type="button">Limpar encontro</button>
+                <button id="masterHardResetCombatButton" class="danger-button small-button" type="button">Resetar combate global</button>
+              </div>
+            </div>
+            <div id="masterActiveEncounterSummary" class="cards-grid compact-cards"></div>
+            <div id="masterActiveEncounterQuickAdd" class="master-encounter-participants top-gap-small"></div>
+            <div id="masterActiveEncounterList" class="stack-list master-active-encounter-list top-gap"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="masterPlayersTab">
+          <section class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Visao rapida</h3>
+            </div>
+            <div id="masterCharacterList" class="cards-grid"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="masterScenariosTab">
+          <section class="glass-card panel-block master-scenarios-layout">
+            <aside class="master-scenarios-sidebar">
+              <div class="section-title-row">
+                <div>
+                  <h3>Cenarios da sessao</h3>
+                  <p class="subtle">Troque de lugar rapidamente e atualize tudo em tempo real.</p>
+                </div>
+                <button id="masterScenarioAddButton" class="secondary-button small-button" type="button">Novo</button>
+              </div>
+              <div class="master-scenarios-filters">
+                <label>
+                  Buscar
+                  <input id="masterScenarioSearchInput" type="search" placeholder="Nome, tag ou nota" />
+                </label>
+                <label>
+                  Tipo
+                  <select id="masterScenarioFilterType">
+                    <option value="all">Todos</option>
+                  </select>
+                </label>
+                <label>
+                  Status
+                  <select id="masterScenarioFilterStatus">
+                    <option value="all">Todos</option>
+                  </select>
+                </label>
+                <label>
+                  Tags
+                  <input id="masterScenarioFilterTags" type="text" placeholder="tag1, tag2" />
+                </label>
+              </div>
+              <details class="scenario-import-card">
+                <summary>Importar por texto</summary>
+                <p class="subtle">Cole um cenario em blocos Markdown: resumo, NPCs, acontecimentos, pistas, notas e conexoes.</p>
+                <textarea id="masterScenarioBulkInput" rows="8" placeholder="# Nome do cenario&#10;&#10;## RESUMO RAPIDO&#10;Nome: ...&#10;Tipo: Entrada"></textarea>
+                <div class="scenario-action-row">
+                  <button id="masterScenarioBulkImportButton" class="secondary-button small-button" type="button">Importar cenario</button>
+                  <button id="masterScenarioBulkClearButton" class="secondary-button small-button" type="button">Limpar</button>
+                </div>
+                <p id="masterScenarioBulkResult" class="subtle"></p>
+              </details>
+              <div id="masterScenarioList" class="master-scenarios-list"></div>
+            </aside>
+
+            <section class="master-scenarios-detail">
+              <div id="masterScenarioDetail" class="master-scenarios-detail-body"></div>
+            </section>
+
+            <aside class="master-scenarios-tools">
+              <div id="masterScenarioTools" class="master-scenarios-tools-body"></div>
+            </aside>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="masterEditorTab">
+          <section class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Edicao rapida</h3>
+              <button id="masterOpenCompanionManagerButton" class="secondary-button small-button" type="button">Gerenciar mini-fichas</button>
+            </div>
+            <div class="form-grid three-columns master-editor-grid">
+              <label>
+                Personagem
+                <select id="masterCharacterSelect"></select>
+              </label>
+              <label>
+                PV atual
+                <input id="masterPvInput" type="number" min="0" />
+              </label>
+              <label>
+                PE atual
+                <input id="masterPeInput" type="number" min="0" />
+              </label>
+              <label>
+                PD atual
+                <input id="masterPdInput" type="number" min="0" />
+              </label>
+              <label>
+                Instabilidade
+                <input id="masterInstabilityInput" type="number" min="0" max="6" />
+              </label>
+              <label>
+                Status
+                <select id="masterStatusInput">
+                  <option value="Vivo">Vivo</option>
+                  <option value="Morrendo">Morrendo</option>
+                  <option value="Morto">Morto</option>
+                </select>
+              </label>
+              <label class="span-3">
+                Notas rapidas do mestre
+                <textarea id="masterNotesInput" rows="6"></textarea>
+              </label>
+            </div>
+            <div id="masterSelectedSummary" class="cards-grid top-gap"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="masterCompanionDialog" class="entity-dialog glass-card">
+    <form method="dialog" class="dialog-close-row">
+      <button class="secondary-button small-button" value="cancel">Fechar</button>
+    </form>
+    <div class="section-title-row">
+      <h3 id="masterCompanionDialogTitle">Mini-fichas do personagem</h3>
+      <div class="card-actions-row">
+        <button id="masterAddCompanionButton" class="secondary-button small-button" type="button">Nova mini-ficha</button>
+        <button id="masterCompanionApplyButton" class="primary-button small-button" type="button">Aplicar mudancas</button>
+      </div>
+    </div>
+
+    <div class="master-companion-dialog-grid">
+      <article class="info-card entity-sticky-panel master-companion-sidebar">
+        <div id="masterCompanionStickyAvatar" class="avatar-shell profile-editor-avatar square-avatar"></div>
+        <div class="entity-identity-block top-gap-small">
+          <strong id="masterCompanionStickyName">Sem mini-ficha</strong>
+          <span id="masterCompanionStickyType">Sem tipo</span>
+          <small id="masterCompanionStickyStatus">Sem status</small>
+        </div>
+        <div id="masterCompanionPicker" class="stack-list compact-stack"></div>
+      </article>
+
+      <div class="entity-dialog-content stack-list">
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Colar mudancas</h4>
+          </div>
+          <label>
+            Bloco de atualizacao
+            <textarea id="masterCompanionBulkInput" rows="8" placeholder="Pelagornis&#10;forca 4 -> 5&#10;destreza 3 -> 4&#10;pericia voo 6 destreza&#10;faceta rasante rank 2&#10;status Vivo"></textarea>
+          </label>
+          <p class="subtle">A primeira linha pode ser o nome da mini-ficha. Tambem aceita linhas como pericia, faceta, PV, status e atributos.</p>
+          <div id="masterCompanionBulkResult" class="master-bulk-result subtle">Cole um bloco e aplique para atualizar sem editar alien por alien.</div>
+        </article>
+
+        <div class="form-grid two-columns">
+          <label>
+            Nome
+            <input id="masterCompanionNameInput" type="text" />
+          </label>
+          <label>
+            Tipo
+            <input id="masterCompanionTypeInput" type="text" placeholder="Forma, ajudante, entidade..." />
+          </label>
+          <label>
+            Status
+            <select id="masterCompanionStatusInput">
+              <option value="Vivo">Vivo</option>
+              <option value="Morrendo">Morrendo</option>
+              <option value="Morto">Morto</option>
+            </select>
+          </label>
+          <label>
+            Armadura
+            <input id="masterCompanionArmorInput" type="number" min="0" />
+          </label>
+          <label>
+            PV atual
+            <input id="masterCompanionPvCurrentInput" type="number" min="0" />
+          </label>
+          <label>
+            PV maximo
+            <input id="masterCompanionPvMaxInput" type="number" min="0" />
+          </label>
+        </div>
+
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Atributos</h4>
+          </div>
+          <div class="mini-stats-grid three-columns">
+            <label>
+              Forca
+              <input id="masterCompanionAttrForcaInput" type="number" min="0" />
+            </label>
+            <label>
+              Destreza
+              <input id="masterCompanionAttrDestrezaInput" type="number" min="0" />
+            </label>
+            <label>
+              Sentidos
+              <input id="masterCompanionAttrSentidosInput" type="number" min="0" />
+            </label>
+            <label>
+              Vigor
+              <input id="masterCompanionAttrVigorInput" type="number" min="0" />
+            </label>
+            <label>
+              Inteligencia
+              <input id="masterCompanionAttrInteligenciaInput" type="number" min="0" />
+            </label>
+            <label>
+              Nexo
+              <input id="masterCompanionAttrNexoInput" type="number" min="0" />
+            </label>
+          </div>
+        </article>
+
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Pericias</h4>
+          </div>
+          <div id="masterCompanionSkillsView" class="stack-list compact-stack"></div>
+        </article>
+
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Facetas</h4>
+          </div>
+          <div id="masterCompanionFacetsView" class="stack-list compact-stack"></div>
+        </article>
+
+        <label>
+          Notas
+          <textarea id="masterCompanionNotesInput" rows="4"></textarea>
+        </label>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="masterEnemyDialog" class="entity-dialog glass-card">
+    <form method="dialog" class="dialog-close-row">
+      <button class="secondary-button small-button" value="cancel">Fechar</button>
+    </form>
+    <div class="section-title-row">
+      <h3 id="masterEnemyDialogTitle">Ficha de inimigo</h3>
+      <div class="card-actions-row">
+        <button id="masterEnemyDeleteButton" class="danger-button small-button" type="button">Excluir</button>
+        <button id="masterEnemySaveButton" class="primary-button small-button" type="button">Salvar ficha</button>
+      </div>
+    </div>
+
+    <div class="entity-dialog-grid master-enemy-dialog-grid">
+      <article class="info-card entity-sticky-panel master-enemy-sidebar">
+        <div id="masterEnemyStickyAvatar" class="avatar-shell profile-editor-avatar square-avatar"></div>
+        <div class="entity-identity-block top-gap-small">
+          <strong id="masterEnemyStickyName">Novo inimigo</strong>
+          <span id="masterEnemyStickyRole">Capanga</span>
+          <small id="masterEnemyStickySource">Manual</small>
+        </div>
+        <div id="masterEnemyStickyMeta" class="stack-list compact-stack"></div>
+      </article>
+
+      <div class="entity-dialog-content stack-list">
+        <div class="form-grid two-columns">
+          <label>
+            Nome
+            <input id="masterEnemyNameInput" type="text" />
+          </label>
+          <label>
+            Papel
+            <input id="masterEnemyRoleInput" type="text" placeholder="Capanga, elite, boss..." />
+          </label>
+          <label>
+            Status
+            <select id="masterEnemyStatusInput">
+              <option value="Vivo">Vivo</option>
+              <option value="Morrendo">Morrendo</option>
+              <option value="Morto">Morto</option>
+            </select>
+          </label>
+          <label>
+            Unidades atuais
+            <input id="masterEnemyCountCurrentInput" type="number" min="0" />
+          </label>
+          <label>
+            Unidades base
+            <input id="masterEnemyCountMaxInput" type="number" min="1" />
+          </label>
+          <p class="subtle span-2">Salvar com mais de 1 unidade cria fichas separadas automaticamente para facilitar o controle de dano.</p>
+          <label>
+            PV atual por unidade
+            <input id="masterEnemyPvCurrentInput" type="number" min="0" />
+          </label>
+          <label>
+            PV maximo por unidade
+            <input id="masterEnemyPvMaxInput" type="number" min="0" />
+          </label>
+          <label>
+            Armadura
+            <input id="masterEnemyArmorInput" type="number" min="0" />
+          </label>
+          <label>
+            Esquiva
+            <input id="masterEnemyDodgeInput" type="number" min="0" />
+          </label>
+          <label>
+            Bloqueio
+            <input id="masterEnemyBlockInput" type="number" min="0" />
+          </label>
+          <label>
+            Iniciativa
+            <input id="masterEnemyInitiativeInput" type="number" min="0" />
+          </label>
+          <label>
+            Ataque
+            <input id="masterEnemyAttackInput" type="number" min="0" />
+          </label>
+          <label>
+            PE
+            <input id="masterEnemyPeInput" type="number" min="0" />
+          </label>
+          <label>
+            PD
+            <input id="masterEnemyPdInput" type="number" min="0" />
+          </label>
+          <label>
+            Dano
+            <input id="masterEnemyDamageLabelInput" type="text" placeholder="Impulso, Menor..." />
+          </label>
+          <label>
+            Expressao de dano
+            <input id="masterEnemyDamageExpressionInput" type="text" placeholder="2d6 + Nexo" />
+          </label>
+          <label>
+            Media de dano
+            <input id="masterEnemyDamageAverageInput" type="number" min="0" />
+          </label>
+          <label class="span-2">
+            Origem
+            <input id="masterEnemySourceInput" type="text" placeholder="Boss • Pesada" />
+          </label>
+        </div>
+
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Atributos principais</h4>
+            <p class="subtle">Use so o que fizer sentido para esse inimigo.</p>
+          </div>
+          <div class="mini-stats-grid three-columns">
+            <label>
+              Forca
+              <input id="masterEnemyAttrForcaInput" type="number" min="0" />
+            </label>
+            <label>
+              Destreza
+              <input id="masterEnemyAttrDestrezaInput" type="number" min="0" />
+            </label>
+            <label>
+              Sentidos
+              <input id="masterEnemyAttrSentidosInput" type="number" min="0" />
+            </label>
+            <label>
+              Vigor
+              <input id="masterEnemyAttrVigorInput" type="number" min="0" />
+            </label>
+            <label>
+              Inteligencia
+              <input id="masterEnemyAttrInteligenciaInput" type="number" min="0" />
+            </label>
+            <label>
+              Nexo
+              <input id="masterEnemyAttrNexoInput" type="number" min="0" />
+            </label>
+          </div>
+        </article>
+
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Dano basico</h4>
+            <p class="subtle">Ataque desarmado ou golpe base quando ele nao usa a acao principal.</p>
+          </div>
+          <div class="form-grid three-columns">
+            <label>
+              Escala
+              <input id="masterEnemyBasicDamageLabelInput" type="text" placeholder="Desarmado" />
+            </label>
+            <label class="span-2">
+              Expressao
+              <input id="masterEnemyBasicDamageExpressionInput" type="text" placeholder="1d6 + Forca/2" />
+            </label>
+            <label>
+              Media
+              <input id="masterEnemyBasicDamageAverageInput" type="number" min="0" />
+            </label>
+          </div>
+        </article>
+
+        <label>
+          Notas
+          <textarea id="masterEnemyNotesInput" rows="6"></textarea>
+        </label>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="assets/js/runtime-config.js?v=2"></script>
+  <script src="assets/js/config.js?v=29"></script>
+  <script src="assets/js/api.js?v=5"></script>
+  <script src="assets/js/system.js?v=41"></script>
+  <script src="assets/js/combat-utils.js?v=1"></script>
+  <script src="assets/js/companion-ui.js?v=2"></script>
+  <script src="assets/js/mock-data.js?v=27"></script>
+  <script src="assets/js/storage.js?v=32"></script>
+  <script src="assets/js/auth.js?v=33"></script>
+  <script src="assets/js/master.js?v=72"></script>
+</body>
+</html>
+
+

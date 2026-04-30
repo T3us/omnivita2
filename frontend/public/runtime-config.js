@@ -1,0 +1,3 @@
+window.OMNIVITA_RUNTIME_CONFIG = window.OMNIVITA_RUNTIME_CONFIG || {
+  apiBaseUrl: 'http://26.163.20.168:3001'
+};

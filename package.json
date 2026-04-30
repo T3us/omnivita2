@@ -1,0 +1,18 @@
+{
+  "name": "omnivita-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-app.mjs",
+    "build:legacy": "node scripts/build-static.mjs",
+    "build:frontend": "npm --prefix frontend run build",
+    "check:frontend": "npm --prefix frontend run check",
+    "test:frontend": "npm --prefix frontend run test",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "serve:dist": "node scripts/serve-dist.mjs",
+    "set:api-url": "node scripts/set-runtime-api-url.mjs",
+    "smoke": "node scripts/smoke-api.mjs",
+    "start:local": "powershell -ExecutionPolicy Bypass -File scripts/start-session.ps1 -Mode local",
+    "start:radmin": "powershell -ExecutionPolicy Bypass -File scripts/start-session.ps1 -Mode radmin"
+  }
+}

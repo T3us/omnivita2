@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniVita // Recuperar Dados</title>
+  <link rel="stylesheet" href="assets/css/styles.css?v=52" />
+  <link rel="icon" href="assets/Gemini_Generated_Image_rvnvryrvnvryrvnv.png?v=1" type="image/png" />
+</head>
+<body class="auth-body">
+  <main class="auth-shell">
+    <section class="auth-card glass-card">
+      <div class="auth-brand">
+        <span class="chip">RECUPERAÇÃO</span>
+        <h1>Exportar dados do navegador</h1>
+        <p>Use esta página no navegador de cada player para salvar o que ainda estiver em cache.</p>
+      </div>
+
+      <div class="stack-list">
+        <button id="inspectRecoveryButton" class="secondary-button" type="button">Inspecionar navegador</button>
+        <button id="downloadRecoveryButton" class="primary-button" type="button" disabled>Baixar bundle de recuperação</button>
+      </div>
+
+      <article class="helper-box top-gap-small">
+        <strong>Como usar</strong>
+        <p>1. Abra esta página no navegador certo.</p>
+        <p>2. Clique em <code>Inspecionar navegador</code>.</p>
+        <p>3. Se aparecerem fichas, clique em <code>Baixar bundle de recuperação</code>.</p>
+        <p>4. Mande o arquivo para o mestre colocar em <code>migration-input/recovery-bundles</code>.</p>
+      </article>
+
+      <div id="recoverySummary" class="helper-box top-gap-small">Nenhuma análise feita ainda.</div>
+      <div id="recoveryCharacters" class="stack-list top-gap-small"></div>
+    </section>
+  </main>
+
+  <script src="assets/js/mock-data.js?v=27"></script>
+  <script src="assets/js/recovery.js?v=1"></script>
+</body>
+</html>

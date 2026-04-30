@@ -1,0 +1,591 @@
+:root {
+  --bg: #030106;
+  --ink: #010003;
+  --purple-black: #0a0210;
+  --purple-deep: #1a0828;
+  --purple-active: #2e124a;
+  --purple: #9e35ff;
+  --purple-light: #e58aff;
+  --purple-soft: #c990ff;
+  --white: #fff4ff;
+  --muted: #a994b3;
+  --line: rgba(226, 138, 255, 0.2);
+  --font: "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--white);
+  font-family: var(--font);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(158, 53, 255, 0.18), transparent 31%),
+    radial-gradient(circle at 82% 18%, rgba(229, 138, 255, 0.08), transparent 22%),
+    linear-gradient(135deg, #020003 0%, #10051a 46%, #030106 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgba(255,255,255,.52) 0 1px, transparent 1.7px) 22px 18px / 140px 120px,
+    radial-gradient(circle, rgba(218,125,255,.36) 0 1px, transparent 1.7px) 70px 44px / 180px 150px;
+  opacity: .18;
+  mask-image: radial-gradient(circle at center, black, transparent 78%);
+}
+
+button {
+  font: inherit;
+}
+
+.ov-app {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+}
+
+.ov-scene {
+  position: relative;
+  width: min(760px, 100vw);
+  height: min(820px, 100vh);
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+}
+
+.ov-device,
+.ov-vortex,
+.ov-controls,
+.ov-status {
+  grid-area: 1 / 1;
+}
+
+.ov-device {
+  position: relative;
+  z-index: 10;
+  width: min(250px, 58vw);
+  height: min(560px, 78vh);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: transform .45s cubic-bezier(.16, 1, .3, 1), opacity .3s ease, filter .3s ease;
+}
+
+.ov-device:hover {
+  transform: translateY(-3px);
+  filter: brightness(1.08);
+}
+
+.state-open .ov-device,
+.state-transformed .ov-device,
+.state-discharging .ov-device {
+  transform: translateX(-240px) scale(.7);
+  opacity: .28;
+  pointer-events: none;
+}
+
+.state-cooldown .ov-device {
+  filter: brightness(.42) saturate(.5);
+}
+
+.ov-cylinder {
+  position: absolute;
+  inset: 28px 18px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 36% 27%, rgba(255,255,255,.44), transparent 4%),
+    radial-gradient(circle at 66% 52%, rgba(255,255,255,.35), transparent 3.5%),
+    radial-gradient(circle at 32% 72%, rgba(255,255,255,.3), transparent 3%),
+    linear-gradient(15deg, #170722 0%, #b737ff 45%, #6a1ba8 73%, #09030f 100%);
+  box-shadow:
+    inset 0 38px 46px rgba(0,0,0,.75),
+    inset 0 -42px 52px rgba(0,0,0,.82),
+    inset 0 0 38px rgba(255,255,255,.12),
+    0 28px 80px rgba(119, 28, 200, .36);
+}
+
+.ov-cylinder::before {
+  content: "";
+  position: absolute;
+  inset: -8% -42%;
+  background:
+    radial-gradient(circle at 53% 44%, rgba(255, 225, 255, .35), transparent 11%),
+    linear-gradient(20deg, transparent 19%, rgba(255,255,255,.38), transparent 29%);
+  transform: rotate(8deg);
+  opacity: .58;
+}
+
+.ov-cap {
+  position: absolute;
+  z-index: 2;
+  left: 25px;
+  width: calc(100% - 50px);
+  height: 125px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 58% 50%, rgba(194, 83, 255, .48), transparent 34%),
+    linear-gradient(180deg, #020103, #170820 56%, #030105);
+  border: 1px solid rgba(229, 138, 255, .18);
+  box-shadow: inset 0 0 28px rgba(0,0,0,.84);
+}
+
+.ov-cap.left {
+  top: -9px;
+}
+
+.ov-cap.right {
+  bottom: -9px;
+}
+
+.ov-star,
+.ov-mark {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.ov-star {
+  width: 28px;
+  height: 28px;
+  background: rgba(255,255,255,.88);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  filter: drop-shadow(0 0 12px rgba(255,255,255,.65));
+}
+
+.star-a {
+  left: 29%;
+  top: 29%;
+}
+
+.star-b {
+  right: 28%;
+  bottom: 31%;
+  width: 20px;
+  height: 20px;
+}
+
+.star-c {
+  right: 39%;
+  top: 57%;
+  width: 15px;
+  height: 15px;
+}
+
+.ov-mark {
+  border: 2px solid rgba(255,225,255,.46);
+  opacity: .72;
+}
+
+.mark-a {
+  left: 21%;
+  top: 22%;
+  width: 31px;
+  height: 54px;
+  border-radius: 50% 14px 50% 14px;
+  transform: rotate(-20deg);
+}
+
+.mark-b {
+  right: 20%;
+  bottom: 21%;
+  width: 58px;
+  height: 24px;
+  border-radius: 999px;
+}
+
+.ov-core {
+  position: relative;
+  z-index: 5;
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow:
+    0 0 0 8px rgba(0,0,0,.8),
+    0 0 0 13px rgba(214, 105, 255, .42),
+    0 0 38px rgba(226, 138, 255, .6);
+}
+
+.ov-core-ring {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid rgba(226,138,255,.6);
+  border-left-color: transparent;
+  animation: spin-vortex 6s linear infinite;
+}
+
+.ov-core-hole {
+  width: 50%;
+  height: 50%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, #010003 0 48%, rgba(94, 20, 145, .8) 49% 62%, transparent 63%),
+    #010003;
+}
+
+.ov-vortex {
+  position: relative;
+  z-index: 4;
+  width: 82px;
+  height: 82px;
+  overflow: hidden;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(.18);
+  background: var(--ink);
+  transition:
+    width .72s cubic-bezier(.16, 1, .3, 1),
+    height .72s cubic-bezier(.16, 1, .3, 1),
+    transform .72s cubic-bezier(.16, 1, .3, 1),
+    opacity .24s ease,
+    box-shadow .35s ease;
+}
+
+.state-open .ov-vortex,
+.state-transformed .ov-vortex,
+.state-discharging .ov-vortex {
+  width: min(640px, 92vw);
+  height: min(640px, 92vw);
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+  box-shadow:
+    0 0 0 14px rgba(2, 0, 5, .9),
+    0 0 0 22px rgba(98, 24, 145, .36),
+    0 0 120px rgba(158, 53, 255, .58);
+}
+
+.state-cooldown .ov-vortex {
+  width: 116px;
+  height: 116px;
+  opacity: .54;
+  transform: scale(.78);
+  box-shadow:
+    0 0 0 12px rgba(0,0,0,.9),
+    0 0 34px rgba(48, 16, 68, .34);
+}
+
+.ov-vortex-layer,
+.ov-vortex-hole {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.layer-a {
+  background:
+    conic-gradient(from 20deg, #010003, #651698 13%, #e58aff 17%, #230739 32%, #010003 45%, #9e35ff 62%, #fff4ff 66%, #1b062b 78%, #010003);
+  opacity: .78;
+  animation: spin-vortex 19s linear infinite;
+}
+
+.layer-b {
+  inset: 12%;
+  background:
+    conic-gradient(from 160deg, transparent, rgba(229,138,255,.56), transparent 31%, rgba(158,53,255,.5), transparent 70%);
+  box-shadow: inset 0 0 58px rgba(0,0,0,.92);
+  animation: spin-vortex 10s linear infinite reverse;
+}
+
+.layer-c {
+  inset: 25%;
+  border: 1px dashed rgba(244,199,255,.28);
+  animation: spin-vortex 12s linear infinite;
+}
+
+.ov-vortex-hole {
+  inset: 36%;
+  z-index: 2;
+  background:
+    radial-gradient(circle at center, #010003 0 46%, rgba(58, 11, 89, .94) 47% 62%, transparent 63%);
+  box-shadow:
+    inset 0 0 38px rgba(0,0,0,.92),
+    0 0 42px rgba(0,0,0,.72);
+}
+
+.ov-forms {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+}
+
+.alien-token {
+  --offset: 0;
+  --distance: 0;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(86px, 16vw, 132px);
+  height: clamp(86px, 16vw, 132px);
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(229,138,255,.22);
+  border-radius: 34px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.08), rgba(255,255,255,.018)),
+    rgba(17, 5, 28, .78);
+  box-shadow: 0 18px 44px rgba(0,0,0,.36);
+  opacity: calc(1 - (var(--distance) * .24));
+  transform:
+    translate(-50%, calc(-50% + (var(--offset) * 148px)))
+    scale(calc(1 - (var(--distance) * .1)));
+  cursor: pointer;
+  transition: transform .3s ease, opacity .3s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+
+.state-transformed .alien-token:not(.is-active),
+.state-discharging .alien-token:not(.is-active),
+.state-cooldown .alien-token {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.state-transformed .alien-token.is-active,
+.state-discharging .alien-token.is-active {
+  width: clamp(150px, 24vw, 210px);
+  height: clamp(150px, 24vw, 210px);
+  border-radius: 46px;
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.alien-token.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.alien-token.is-selected {
+  z-index: 4;
+  border-color: rgba(244,199,255,.64);
+  background:
+    linear-gradient(135deg, rgba(158,53,255,.26), rgba(255,255,255,.04)),
+    rgba(28, 8, 45, .9);
+  box-shadow:
+    0 20px 50px rgba(0,0,0,.38),
+    0 0 34px rgba(158,53,255,.22);
+}
+
+.alien-token.is-active {
+  border-color: rgba(88, 28, 142, .88);
+  background:
+    linear-gradient(135deg, rgba(46, 18, 74, .98), rgba(13, 3, 22, .98)),
+    var(--purple-active);
+  box-shadow:
+    inset 0 0 0 1px rgba(226,138,255,.08),
+    0 0 38px rgba(76, 20, 126, .42);
+}
+
+.state-discharging .alien-token.is-active {
+  animation: discharge-token .32s steps(2, end) infinite;
+}
+
+.alien-photo {
+  position: relative;
+  width: 84%;
+  height: 84%;
+  overflow: hidden;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,.22), transparent 25%),
+    var(--alien-bg);
+  box-shadow:
+    inset 0 0 26px rgba(0,0,0,.54),
+    0 0 22px rgba(158,53,255,.16);
+}
+
+.alien-photo::before,
+.alien-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.alien-photo::before {
+  background:
+    radial-gradient(circle at center, transparent 0 54%, rgba(0,0,0,.42) 75%, rgba(0,0,0,.78) 100%),
+    linear-gradient(90deg, rgba(229,138,255,.12), transparent 32% 68%, rgba(229,138,255,.12));
+  mix-blend-mode: multiply;
+}
+
+.alien-photo::after {
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px rgba(244,199,255,.16),
+    inset 0 0 28px rgba(229,138,255,.12);
+}
+
+.alien-photo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  transform: scale(1.05);
+  filter:
+    saturate(.86)
+    contrast(1.16)
+    brightness(.9)
+    drop-shadow(0 0 10px rgba(0,0,0,.7));
+  transition: transform .3s ease, filter .3s ease;
+}
+
+.alien-token.is-selected .alien-photo img {
+  transform: scale(1.12);
+  filter:
+    saturate(1.08)
+    contrast(1.24)
+    brightness(1.02)
+    drop-shadow(0 0 16px rgba(229,138,255,.26));
+}
+
+.state-transformed .alien-token.is-active .alien-photo {
+  width: 90%;
+  height: 90%;
+  box-shadow:
+    inset 0 0 34px rgba(0,0,0,.58),
+    0 0 42px rgba(158,53,255,.28);
+}
+
+.state-transformed .alien-token.is-active .alien-photo img,
+.state-discharging .alien-token.is-active .alien-photo img {
+  object-fit: contain;
+  transform: scale(1.03);
+  filter:
+    saturate(1.02)
+    contrast(1.3)
+    brightness(.92)
+    drop-shadow(0 0 20px rgba(229,138,255,.3));
+}
+
+.ov-controls {
+  z-index: 12;
+  align-self: end;
+  justify-self: center;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  opacity: .44;
+  transition: opacity .2s ease;
+}
+
+.ov-controls:hover {
+  opacity: 1;
+}
+
+.ov-controls button {
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgba(229,138,255,.22);
+  border-radius: 16px;
+  color: var(--white);
+  background: rgba(255,255,255,.05);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.ov-controls button:hover {
+  border-color: rgba(244,199,255,.6);
+  background: rgba(158,53,255,.14);
+}
+
+.ov-status {
+  z-index: 13;
+  align-self: start;
+  justify-self: center;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(229,138,255,.18);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(7, 2, 11, .68);
+  backdrop-filter: blur(10px);
+  font-size: .86rem;
+  opacity: .72;
+}
+
+.state-closed .ov-status {
+  opacity: .45;
+}
+
+.state-cooldown .ov-vortex,
+.state-cooldown .ov-device {
+  filter: brightness(.4) saturate(.45);
+}
+
+.state-cooldown .ov-controls button:not([data-action="main"]) {
+  opacity: .32;
+  pointer-events: none;
+}
+
+.state-discharging .ov-vortex {
+  animation: discharge-vortex .34s steps(2, end) infinite;
+}
+
+@keyframes spin-vortex {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes discharge-token {
+  0% {
+    background: rgba(15, 4, 25, .98);
+    box-shadow: 0 0 12px rgba(73,18,116,.2);
+  }
+
+  100% {
+    background: rgba(194, 76, 255, .78);
+    box-shadow: 0 0 50px rgba(226,138,255,.78);
+  }
+}
+
+@keyframes discharge-vortex {
+  0% {
+    filter: brightness(.76) saturate(.9);
+  }
+
+  100% {
+    filter: brightness(1.55) saturate(1.35);
+  }
+}
+
+@media (max-width: 620px) {
+  .ov-device {
+    height: 160px;
+  }
+
+  .state-open .ov-vortex,
+  .state-transformed .ov-vortex,
+  .state-discharging .ov-vortex {
+    width: min(520px, 96vw);
+    height: min(520px, 96vw);
+  }
+
+  .alien-token {
+    transform:
+      translate(-50%, calc(-50% + (var(--offset) * 118px)))
+      scale(calc(1 - (var(--distance) * .1)));
+  }
+}

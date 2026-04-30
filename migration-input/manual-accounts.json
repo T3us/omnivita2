@@ -1,0 +1,35 @@
+[
+  {
+    "username": "mestre",
+    "password": "12032007",
+    "role": "master"
+  },
+  {
+    "username": "cael",
+    "password": "omnivita",
+    "role": "player",
+    "characterId": "cael",
+    "characterName": "Cael Silveira Gomes"
+  },
+  {
+    "username": "serena",
+    "password": "nanites",
+    "role": "player",
+    "characterId": "serena",
+    "characterName": "Serena"
+  },
+  {
+    "username": "k",
+    "password": "mimer",
+    "role": "player",
+    "characterId": "k",
+    "characterName": "K"
+  },
+  {
+    "username": "greg",
+    "password": "muscular",
+    "role": "player",
+    "characterId": "greg",
+    "characterName": "Greg"
+  }
+]

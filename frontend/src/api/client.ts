@@ -1,0 +1,156 @@
+import { getRuntimeApiBaseUrl } from './runtime';
+import type {
+  AuthSession,
+  BootstrapPayload,
+  CharacterSheet,
+  CombatState,
+  MasterData,
+  OmnivitaCodeEvaluationResponse
+} from './types';
+import { clearStoredSession, readStoredSession } from '../auth/session';
+
+interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  auth?: boolean;
+  body?: unknown;
+  timeoutMs?: number;
+}
+
+function friendlyError(message: string, status = 0): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes('timeout') || normalized.includes('aborterror') || normalized.includes('tempo esgotado')) {
+    return 'A API demorou demais para responder. Tente novamente em instantes.';
+  }
+  if (
+    normalized.includes('failed to fetch') ||
+    normalized.includes('econnreset') ||
+    normalized.includes('econnrefused') ||
+    normalized.includes('banco de dados indisponivel') ||
+    normalized.includes('db_unavailable')
+  ) {
+    return 'O backend esta online, mas o banco local nao respondeu. Verifique o PostgreSQL.';
+  }
+  if (status === 503) return 'O backend esta sem acesso ao banco neste momento.';
+  return message || `HTTP ${status || 500}`;
+}
+
+export function getAccessToken(): string {
+  return readStoredSession()?.token || '';
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const baseUrl = getRuntimeApiBaseUrl();
+  if (!baseUrl) {
+    throw new Error('API nao configurada. Rode o start local ou Radmin para atualizar a URL.');
+  }
+
+  const headers: Record<string, string> = {};
+  const token = options.auth === false ? '' : getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), options.timeoutMs || (options.method === 'GET' ? 8000 : 16000));
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: controller.signal
+    });
+  } catch (error) {
+    const raw = error instanceof Error ? error.message : 'Failed to fetch';
+    throw new Error(friendlyError(raw));
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
+  const text = await response.text();
+  const payload = text
+    ? (() => {
+        try {
+          return JSON.parse(text) as unknown;
+        } catch {
+          return { message: text };
+        }
+      })()
+    : null;
+
+  if (!response.ok) {
+    if (response.status === 401) clearStoredSession();
+    const message = typeof payload === 'object' && payload && 'message' in payload
+      ? String((payload as { message?: unknown }).message || '')
+      : '';
+    const wrapped = new Error(friendlyError(message, response.status));
+    Object.assign(wrapped, { status: response.status, payload });
+    throw wrapped;
+  }
+
+  return payload as T;
+}
+
+export const api = {
+  login(identifier: string, password: string) {
+    return apiRequest<AuthSession>('/api/auth/login', {
+      method: 'POST',
+      auth: false,
+      body: { identifier, password }
+    });
+  },
+  session() {
+    return apiRequest<Omit<AuthSession, 'token'>>('/api/auth/session');
+  },
+  logout() {
+    return apiRequest<{ ok: boolean }>('/api/auth/logout', { method: 'POST' });
+  },
+  bootstrap() {
+    return apiRequest<BootstrapPayload>('/api/bootstrap');
+  },
+  getCharacters() {
+    return apiRequest<CharacterSheet[]>('/api/characters');
+  },
+  getMyCharacter() {
+    return apiRequest<CharacterSheet>('/api/characters/me');
+  },
+  updateCharacter(characterId: string, character: CharacterSheet) {
+    return apiRequest<CharacterSheet>(`/api/characters/${encodeURIComponent(characterId)}`, {
+      method: 'PUT',
+      body: { character },
+      timeoutMs: 30000
+    });
+  },
+  getCombat() {
+    return apiRequest<{ state: CombatState }>('/api/combat');
+  },
+  putCombat(state: CombatState, meta: Record<string, unknown> = {}) {
+    return apiRequest<{ state: CombatState }>('/api/combat', {
+      method: 'PUT',
+      body: { state, meta }
+    });
+  },
+  sendCombatControl(control: Record<string, unknown>) {
+    return apiRequest<{ state: CombatState }>('/api/combat/control', {
+      method: 'POST',
+      body: { control }
+    });
+  },
+  getMasterData(key: string) {
+    return apiRequest<{ key: string; data: MasterData | null; updatedAt?: string }>(`/api/master-data/${encodeURIComponent(key)}`);
+  },
+  putMasterData(key: string, data: unknown) {
+    return apiRequest<{ key: string; data: unknown; updatedAt?: string }>(`/api/master-data/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: { data },
+      timeoutMs: 30000
+    });
+  },
+  evaluateOmnivitaCode(trail: Array<'up' | 'down'>) {
+    return apiRequest<OmnivitaCodeEvaluationResponse>('/api/omnivita/evaluate', {
+      method: 'POST',
+      body: { trail },
+      timeoutMs: 12000
+    });
+  }
+};

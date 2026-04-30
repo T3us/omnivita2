@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniVita // Personagem</title>
+  <link rel="stylesheet" href="assets/css/styles.css?v=54" />
+  <link rel="icon" href="assets/Gemini_Generated_Image_rvnvryrvnvryrvnv.png?v=1" type="image/png" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar glass-card">
+      <div>
+        <span class="chip">JOGADOR</span>
+        <div class="sidebar-profile top-gap-small">
+          <div id="sidebarAvatar" class="avatar-shell large-avatar"></div>
+          <div>
+            <h1 id="sidebarCharacterName">Carregando...</h1>
+            <p id="sidebarCharacterSubtitle">Ficha do personagem</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="session-box compact-list">
+        <p><strong>Usuário:</strong> <span id="sessionUserLabel">-</span></p>
+        <p><strong>Papel:</strong> Jogador</p>
+        <p><strong>PeV livres:</strong> <span id="sidebarPeVAvailable">0</span></p>
+        <p><strong>Instabilidade:</strong> <span id="sidebarInstability">0</span>/6</p>
+      </div>
+
+      <section class="sidebar-reference-grid" aria-label="Referência rápida do sistema">
+        
+
+        <article class="reference-card">
+          <h3>Escala de skill</h3>
+          <div class="reference-mini-table">
+            <div><strong>Impulso</strong><span>0–1 PE • Rank 1</span></div>
+            <div><strong>Menor</strong><span>2–3 PE • Rank 1</span></div>
+            <div><strong>Padrão</strong><span>4–5 PE • Rank 2</span></div>
+            <div><strong>Forte</strong><span>6–8 PE • Rank 4</span></div>
+            <div><strong>Pesada</strong><span>9–11 PE • Rank 6</span></div>
+            <div><strong>Extrema</strong><span>12–15 PE • Rank 8</span></div>
+            <div><strong>Além</strong><span>16+ PE • Rank 10+</span></div>
+          </div>
+        </article>
+
+        <article class="reference-card">
+          <h3>Dano</h3>
+          <div class="reference-mini-table compact-damage-table">
+            <div><strong>Impulso</strong><span>1d6 + Nexo/2</span></div>
+            <div><strong>Menor</strong><span>1d12 + Nexo/2 ou 2d6+Nexo</span></div>
+            <div><strong>Padrão</strong><span>2d8 ou 3d6 + Nexo/2</span></div>
+            <div><strong>Forte</strong><span>4d6 + Nexo/2 ou 3d10 + Nexo</span></div>
+            <div><strong>Pesada</strong><span>5d6 + Nexo/2 ou 4d10 + Nexo</span></div>
+            <div><strong>Extrema</strong><span>6d8 + Nexo ou 5d10 + Nexo</span></div>
+          </div>
+        </article>
+      </section>
+
+      <div class="sidebar-actions">
+        <button id="logoutButton" class="secondary-button" type="button">Sair</button>
+      </div>
+    </aside>
+
+    <main class="content-area">
+      <header class="page-header glass-card compact-page-header">
+        <div>
+          <span class="chip">FICHA AUTOMÁTICA</span>
+          <h2>Painel do personagem</h2>
+          <p id="pageCharacterSummary">Resumo do personagem.</p>
+        </div>
+        <div class="page-header-actions">
+          <div class="status-pill" id="saveStatus">Pronto</div>
+          <div class="card-actions-row page-header-action-row">
+            <button id="exportCharacterButton" class="secondary-button small-button" type="button">Exportar JSON</button>
+            <label class="file-button secondary-button small-button">
+              Importar JSON
+              <input id="importCharacterInput" type="file" accept=".json,application/json" hidden />
+            </label>
+          </div>
+        </div>
+      </header>
+
+      <section class="glass-card tab-shell" aria-label="Seções da ficha">
+        <div class="tab-bar" role="tablist" aria-label="Seções da ficha do personagem">
+          <button class="tab-button is-active" type="button" role="tab" aria-selected="true" data-tab="overviewTab">Geral</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="combatTab">Combate</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="skillsTab">Perícias</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="aptitudesTab">Aptidões</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="manifestationTab">Manifestação</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="formsTab">Formas</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="inventoryTab">Inventário</button>
+        </div>
+      </section>
+
+      <div class="tab-panels">
+        <div class="tab-panel is-active" data-panel="overviewTab">
+          <section id="identitySection" class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Identidade e progressão</h3>
+              <div class="inline-badges">
+                <span class="stat-tag" id="classNoteBadge">-</span>
+                <span class="stat-tag" id="attributeLimitBadge">Limite de atributo: 0</span>
+                <span class="stat-tag" id="skillLimitBadge">Limite de perícia: 0</span>
+              </div>
+            </div>
+
+            <div class="profile-editor-grid">
+              <article class="info-card image-editor-card">
+                <h4>Foto do perfil</h4>
+                <div id="profileImagePreview" class="avatar-shell profile-editor-avatar"></div>
+                <div class="stack-actions top-gap-small">
+                  <label class="file-button secondary-button small-button">
+                    Escolher imagem
+                    <input id="profileImageInput" type="file" accept="image/*" hidden />
+                  </label>
+                  <button id="removeProfileImageButton" class="danger-button small-button" type="button">Remover foto</button>
+                </div>
+                <p class="subtle top-gap-small">Use foto do personagem ou de qualquer molestador que quiser.</p>
+              </article>
+
+              <div class="form-grid three-columns">
+                <label>
+                  Nome
+                  <input id="identityName" type="text" />
+                </label>
+                <label>
+                  Idade
+                  <input id="identityAge" type="number" min="0" />
+                </label>
+                <label>
+                  Nível
+                  <input id="identityLevel" type="number" min="1" />
+                </label>
+                <label>
+                  Classe
+                  <select id="identityClass">
+                    <option value="Alterado">Alterado</option>
+                    <option value="Especialista">Especialista</option>
+                    <option value="Combatente">Combatente</option>
+                  </select>
+                </label>
+                <label>
+                  Origem da Manifestação
+                  <input id="identityManifestationOrigin" type="text" placeholder="OmniVita, Nanites, Exposição..." />
+                </label>
+                <label>
+                  Vínculos
+                  <input id="identityLinks" type="text" placeholder="Família, escola, laboratório..." />
+                </label>
+                <label class="span-3">
+                  Conceito
+                  <textarea id="identityConcept" rows="3"></textarea>
+                </label>
+                <label class="span-3">
+                  Resumo
+                  <textarea id="identitySummary" rows="3"></textarea>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section id="attributesSection" class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Atributos</h3>
+              <div class="inline-badges">
+                <span class="stat-tag" id="attributePointsSpentBadge">Gastos: 0</span>
+                <span class="stat-tag" id="attributePointsAvailableBadge">Disponíveis: 0</span>
+              </div>
+            </div>
+            <div id="attributeGrid" class="form-grid three-columns"></div>
+          </section>
+
+          <section id="resourcesSection" class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Recursos e combate</h3>
+              <div class="inline-badges">
+                <span class="stat-tag" id="peVGrantedBadge">PeV totais: 0</span>
+                <span class="stat-tag" id="peVSpentBadge">PeV gastos: 0</span>
+                <span class="stat-tag" id="peVAvailableBadge">PeV livres: 0</span>
+              </div>
+            </div>
+
+            <div class="cards-grid compact-cards">
+              <article class="info-card resource-card">
+                <h4>PV</h4>
+                <div class="current-max-row">
+                  <input id="pvCurrentInput" type="number" min="0" step="1" inputmode="numeric" aria-label="PV atual" />
+                  <span>/</span>
+                  <strong id="pvMaxLabel">0</strong>
+                </div>
+                <small id="pvFormulaLabel" class="formula-note">Máximo calculado automaticamente.</small>
+              </article>
+              <article class="info-card resource-card">
+                <h4>PE</h4>
+                <div class="current-max-row">
+                  <input id="peCurrentInput" type="number" min="0" step="1" inputmode="numeric" aria-label="PE atual" />
+                  <span>/</span>
+                  <strong id="peMaxLabel">0</strong>
+                </div>
+                <small id="peFormulaLabel" class="formula-note">Máximo calculado automaticamente.</small>
+              </article>
+              <article class="info-card resource-card">
+                <h4>PD</h4>
+                <div class="current-max-row">
+                  <input id="pdCurrentInput" type="number" min="0" step="1" inputmode="numeric" aria-label="PD atual" />
+                  <span>/</span>
+                  <strong id="pdMaxLabel">0</strong>
+                </div>
+                <small id="pdFormulaLabel" class="formula-note">Máximo calculado automaticamente.</small>
+              </article>
+              <article class="info-card resource-card">
+                <h4>Instabilidade</h4>
+                <div class="current-max-row">
+                  <input id="instabilityInput" type="number" min="0" max="6" step="1" inputmode="numeric" aria-label="Instabilidade atual" />
+                  <span>/</span>
+                  <strong>6</strong>
+                </div>
+                <small>Trilha separada de PV, PE e PD.</small>
+              </article>
+            </div>
+
+            <div class="form-grid three-columns top-gap">
+              <label>
+                Status atual
+                <select id="resourceStatus">
+                  <option value="Vivo">Vivo</option>
+                  <option value="Morrendo">Morrendo</option>
+                  <option value="Morto">Morto</option>
+                </select>
+              </label>
+              <label>
+                Bônus de Armadura
+                <input id="armorBonusInput" type="number" min="0" />
+              </label>
+              <label>
+                Base do Bloqueio
+                <select id="blockModeSelect">
+                  <option value="vigor">Vigor</option>
+                  <option value="forca">Força</option>
+                </select>
+              </label>
+              <label class="span-3">
+                Fonte da Armadura / proteção
+                <input id="armorEquipmentInput" type="text" placeholder="Equipamento, faceta, cobertura..." />
+              </label>
+            </div>
+
+            <div class="cards-grid top-gap">
+              <article class="info-card derived-card">
+                <h4>Esquiva</h4>
+                <div class="big-number" id="esquivaLabel">+0</div>
+                <p>Somar aos 2d10 em reação.</p>
+              </article>
+              <article class="info-card derived-card">
+                <h4>Bloqueio</h4>
+                <div class="big-number" id="blockLabel">0</div>
+                <p id="blockHelper">10 + Fortitude + metade do atributo escolhido.</p>
+              </article>
+              <article class="info-card derived-card">
+                <h4>Iniciativa</h4>
+                <div class="big-number" id="initiativeLabel">+0</div>
+                <p>Somar aos 2d10 no início do conflito.</p>
+              </article>
+              <article class="info-card derived-card">
+                <h4>Manifestação</h4>
+                <div class="big-number" id="manifestationModLabel">+0</div>
+                <p>Base do teste de Manifestação.</p>
+              </article>
+              <article class="info-card derived-card">
+                <h4>Armadura</h4>
+                <div class="big-number" id="armorLabel">0</div>
+                <p>Classe + bônus adicionais.</p>
+              </article>
+              <article class="info-card derived-card">
+                <h4>Defesa</h4>
+                <div class="big-number text-number" id="defenseSummaryLabel">Esquiva ou Bloqueio</div>
+                <p>O sistema usa a reação escolhida.</p>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="combatTab">
+          <section id="combatSection" class="glass-card panel-block" data-combat-control-panel>
+            <div class="section-title-row">
+              <div>
+                <h3>Combate atual</h3>
+                <p class="subtle">A ordem e o estado do encontro aparecem aqui sem expor PV, PE ou PD dos outros participantes.</p>
+              </div>
+              <span class="stat-tag" id="combatRoundBadge">Sem combate</span>
+            </div>
+            <div id="combatOverviewCards" class="cards-grid compact-cards"></div>
+            <div id="combatControlList" class="stack-list top-gap-small"></div>
+            <div id="combatRosterList" class="stack-list top-gap"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="skillsTab">
+          <section id="skillsSection" class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Perícias</h3>
+              <div class="inline-badges">
+                <span class="stat-tag" id="skillsSpentBadge">PeV em perícias: 0</span>
+              </div>
+            </div>
+            <div id="skillsGrid" class="skills-grid"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="aptitudesTab">
+          <section id="aptitudesSection" class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Aptidões</h3>
+              <button id="addAptitudeButton" class="secondary-button small-button" type="button">Adicionar aptidão</button>
+            </div>
+            <div class="form-grid three-columns compact-form-grid">
+              <label>
+                PeV extras manuais
+                <input id="extraPeVInput" type="number" min="0" />
+              </label>
+              <label>
+                Gastos manuais de PeV
+                <input id="manualPeVSpentInput" type="number" min="0" />
+              </label>
+              <label>
+                Despertar novas Facetas
+                <input id="facetaUnlocksInput" type="number" min="0" />
+              </label>
+              <label>
+                Estabilizar Facetas
+                <input id="facetaStabilizationsInput" type="number" min="0" />
+              </label>
+              <label class="span-2">
+                Observações de progressão
+                <input id="progressionNotesInput" type="text" placeholder="Bônus manuais, recompensas narrativas..." />
+              </label>
+            </div>
+            <div id="aptitudesList" class="stack-list top-gap"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="manifestationTab">
+          <section id="manifestationSection" class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Manifestação e facetas</h3>
+              <button id="addFacetButton" class="secondary-button small-button" type="button">Adicionar faceta</button>
+            </div>
+            <div class="form-grid three-columns">
+              <label>
+                Nome da Manifestação
+                <input id="manifestationNameInput" type="text" />
+              </label>
+              <label>
+                Origem
+                <input id="manifestationOriginInput" type="text" />
+              </label>
+              <label>
+                Estado
+                <select id="manifestationStateInput">
+                  <option value="Parcial">Parcial</option>
+                  <option value="Completa">Completa</option>
+                  <option value="Além">Além</option>
+                </select>
+              </label>
+              <label class="span-3">
+                Glitches / efeitos ativos
+                <textarea id="manifestationGlitchesInput" rows="3"></textarea>
+              </label>
+              <label class="span-3">
+                Efeitos ativos / observações
+                <textarea id="manifestationEffectsInput" rows="3"></textarea>
+              </label>
+            </div>
+
+            <div class="section-title-row minor-title-row top-gap">
+              <h4>Facetas</h4>
+              <p class="subtle">Nome, rank, XP e notas ficam juntos no mesmo bloco.</p>
+            </div>
+            <div id="facetsList" class="stack-list"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="formsTab">
+          <section id="formsSection" class="glass-card panel-block">
+            <div class="section-title-row">
+              <div>
+                <h3>Formas, ajudantes ou entidades</h3>
+                <p class="subtle">Cada item abre uma mini-ficha simplificada com foto, atributos, perícias, facetas e controle de PV.</p>
+              </div>
+              <button id="addCompanionButton" class="secondary-button small-button" type="button">Adicionar</button>
+            </div>
+            <div id="companionsList" class="cards-grid"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-panel="inventoryTab">
+          <section id="inventorySection" class="glass-card panel-block">
+            <div class="section-title-row">
+              <h3>Inventário e anotações</h3>
+            </div>
+            <div class="form-grid three-columns">
+              <label>
+                Arma principal
+                <input id="primaryWeaponInput" type="text" />
+              </label>
+              <label>
+                Arma secundária
+                <input id="secondaryWeaponInput" type="text" />
+              </label>
+              <label>
+                Aparência
+                <input id="appearanceInput" type="text" placeholder="Traço visual marcante" />
+              </label>
+              <label class="span-3">
+                Itens
+                <textarea id="itemsInput" rows="4"></textarea>
+              </label>
+              <label class="span-3">
+                Notas do personagem
+                <textarea id="characterNotesInput" rows="6"></textarea>
+              </label>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="companionDialog" class="entity-dialog glass-card">
+    <form method="dialog" class="dialog-close-row">
+      <button class="secondary-button small-button" value="cancel">Fechar</button>
+    </form>
+    <div class="section-title-row">
+      <h3 id="companionDialogTitle">Mini-ficha</h3>
+      <button id="deleteCompanionButton" class="danger-button small-button" type="button">Excluir</button>
+    </div>
+
+    <div class="entity-dialog-grid">
+      <article class="info-card image-editor-card entity-sticky-panel">
+        <h4>Foto da forma / ajudante</h4>
+        <div id="companionImagePreview" class="avatar-shell profile-editor-avatar square-avatar"></div>
+        <div class="entity-identity-block top-gap-small">
+          <strong id="companionStickyName">Sem nome</strong>
+          <span id="companionStickyType">Sem tipo</span>
+          <small id="companionStickyStatus">Sem status</small>
+        </div>
+        <div class="stack-actions top-gap-small">
+          <label class="file-button secondary-button small-button">
+            Escolher imagem
+            <input id="companionImageInput" type="file" accept="image/*" hidden />
+          </label>
+          <button id="removeCompanionImageButton" class="danger-button small-button" type="button">Remover foto</button>
+        </div>
+      </article>
+
+      <div class="entity-dialog-content stack-list">
+        <div class="form-grid two-columns">
+          <label>
+            Nome
+            <input id="companionNameInput" type="text" />
+          </label>
+          <label>
+            Tipo
+            <input id="companionTypeInput" type="text" placeholder="Forma, ajudante, entidade..." />
+          </label>
+          <label>
+            Status
+            <select id="companionStatusInput">
+              <option value="Vivo">Vivo</option>
+              <option value="Morrendo">Morrendo</option>
+              <option value="Morto">Morto</option>
+            </select>
+          </label>
+          <label>
+            Armadura
+            <input id="companionArmorInput" type="number" min="0" />
+          </label>
+          <label>
+            PV atual
+            <input id="companionPvCurrentInput" type="number" min="0" />
+          </label>
+          <label>
+            PV máximo
+            <input id="companionPvMaxInput" type="number" min="0" />
+          </label>
+        </div>
+
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Atributos</h4>
+          </div>
+          <div class="mini-stats-grid three-columns">
+            <label>
+              Força
+              <input id="companionAttrForcaInput" type="number" min="0" />
+            </label>
+            <label>
+              Destreza
+              <input id="companionAttrDestrezaInput" type="number" min="0" />
+            </label>
+            <label>
+              Sentidos
+              <input id="companionAttrSentidosInput" type="number" min="0" />
+            </label>
+            <label>
+              Vigor
+              <input id="companionAttrVigorInput" type="number" min="0" />
+            </label>
+            <label>
+              Inteligência
+              <input id="companionAttrInteligenciaInput" type="number" min="0" />
+            </label>
+            <label>
+              Nexo
+              <input id="companionAttrNexoInput" type="number" min="0" />
+            </label>
+          </div>
+        </article>
+
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Perícias</h4>
+            <button id="addCompanionSkillButton" class="secondary-button small-button" type="button">Adicionar</button>
+          </div>
+          <div id="companionSkillsList" class="stack-list compact-stack"></div>
+        </article>
+
+        <article class="info-card compact-entity-section">
+          <div class="minor-title-row">
+            <h4>Facetas</h4>
+            <button id="addCompanionFacetButton" class="secondary-button small-button" type="button">Adicionar</button>
+          </div>
+          <div id="companionFacetsList" class="stack-list compact-stack"></div>
+        </article>
+
+        <label>
+          Notas
+          <textarea id="companionNotesInput" rows="4"></textarea>
+        </label>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="assets/js/runtime-config.js?v=2"></script>
+  <script src="assets/js/config.js?v=29"></script>
+  <script src="assets/js/api.js?v=5"></script>
+  <script src="assets/js/system.js?v=41"></script>
+  <script src="assets/js/combat-utils.js?v=1"></script>
+  <script src="assets/js/companion-ui.js?v=2"></script>
+  <script src="assets/js/mock-data.js?v=27"></script>
+  <script src="assets/js/storage.js?v=32"></script>
+  <script src="assets/js/auth.js?v=33"></script>
+  <script src="assets/js/player.js?v=65"></script>
+</body>
+</html>
