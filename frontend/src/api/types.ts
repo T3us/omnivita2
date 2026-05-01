@@ -144,20 +144,39 @@ export interface OmnivitaCodeEvaluationResponse {
 }
 
 export type TabletopMode = 'build' | 'session';
-export type MapLayerKey = 'floor' | 'walls' | 'objects' | 'decoration' | 'lighting' | 'collision' | 'fog' | 'notes' | 'tokens';
+export type MapLayerKey = 'floor' | 'walls' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
 export type MapTool = 'select' | 'brush' | 'wall' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'token';
-export type MapObjectKind = 'prop' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
+export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
 export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
+export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
 
-export interface Asset {
+export interface AssetDefinition {
   id: string;
   name: string;
-  kind: MapObjectKind | 'floor' | 'wall' | 'fog';
-  color: string;
+  category: string;
+  tags: string[];
+  imageUrl: string;
+  thumbnailUrl: string;
+  defaultLayer: MapLayerKey;
+  defaultWidth: number;
+  defaultHeight: number;
+  defaultBlocksMovement: boolean;
+  defaultBlocksVision: boolean;
+  defaultGivesCover: boolean;
+  kind?: MapObjectKind | 'floor' | 'wall' | 'fog';
+  defaultOpacity?: number;
+  defaultInteractable?: boolean;
+  color?: string;
   stroke?: string;
   icon?: string;
-  tags?: string[];
+  thumbnail?: string;
+  blocksMovement?: boolean;
+  blocksVision?: boolean;
+  givesCover?: boolean;
+  interactable?: boolean;
 }
+
+export type Asset = AssetDefinition;
 
 export interface Tileset {
   id: string;
@@ -191,20 +210,44 @@ export interface LightSource {
   color: string;
 }
 
+export interface MapPrefabObject {
+  object: MapObject;
+  offsetX: number;
+  offsetY: number;
+}
+
+export interface MapPrefab {
+  id: string;
+  name: string;
+  objects: MapPrefabObject[];
+  createdAt: string;
+}
+
 export interface MapObject {
   id: string;
-  kind: MapObjectKind;
-  name: string;
   assetId: string;
   x: number;
   y: number;
   width: number;
   height: number;
   rotation: number;
-  visibleToPlayers: boolean;
+  zIndex: number;
+  layer: MapLayerKey;
+  opacity: number;
   locked: boolean;
-  color?: string;
+  hiddenFromPlayers: boolean;
+  parentId?: string;
+  blocksMovement: boolean;
+  blocksVision: boolean;
+  givesCover: boolean;
+  interactable: boolean;
   note?: string;
+  kind: MapObjectKind;
+  name: string;
+  groupId?: string;
+  scale: number;
+  visibleToPlayers: boolean;
+  color?: string;
   light?: LightSource;
 }
 
@@ -252,10 +295,13 @@ export interface OmniMap {
   tileLayers: Record<'floor' | 'walls' | 'collision', TileLayer>;
   objectLayer: ObjectLayer;
   decorationLayer: ObjectLayer;
+  detailLayer: ObjectLayer;
   lightingLayer: ObjectLayer;
+  mechanicalLayer: ObjectLayer;
   notesLayer: ObjectLayer;
   fogLayer: FogLayer;
   tokens: TabletopToken[];
+  prefabs?: MapPrefab[];
   createdAt?: string;
   updatedAt?: string;
 }

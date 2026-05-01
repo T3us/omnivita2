@@ -1,8 +1,9 @@
-import { DEFAULT_TILESETS, getAsset } from './assets';
+import { DEFAULT_TILESETS, getAsset, normalizeAsset } from './assets';
 import type {
   FogLayer,
   MapLayerKey,
   MapObject,
+  MapPrefab,
   ObjectLayer,
   OmniMap,
   TabletopMode,
@@ -71,10 +72,13 @@ export function createBlankMap(name = 'Novo mapa', width = DEFAULT_WIDTH, height
     },
     objectLayer: createObjectLayer('objects', 'Objetos'),
     decorationLayer: createObjectLayer('decoration', 'Decoracao'),
+    detailLayer: createObjectLayer('details', 'Detalhes'),
     lightingLayer: createObjectLayer('lighting', 'Luzes'),
+    mechanicalLayer: createObjectLayer('mechanics', 'Mecanica'),
     notesLayer: createObjectLayer('notes', 'Notas'),
     fogLayer: createFogLayer(),
-    tokens: []
+    tokens: [],
+    prefabs: []
   };
 }
 
@@ -90,7 +94,7 @@ export function normalizeMap(input: Partial<OmniMap> | null | undefined): OmniMa
     gridSize: clampInteger(input?.gridSize, 24, 96),
     mode: normalizeMode(input?.mode),
     activeLayer: normalizeLayer(input?.activeLayer),
-    tilesets: Array.isArray(input?.tilesets) && input?.tilesets.length ? input.tilesets : DEFAULT_TILESETS,
+    tilesets: normalizeTilesets(input?.tilesets),
     tileLayers: {
       floor: normalizeTileLayer(input?.tileLayers?.floor, base.tileLayers.floor),
       walls: normalizeTileLayer(input?.tileLayers?.walls, base.tileLayers.walls),
@@ -98,10 +102,13 @@ export function normalizeMap(input: Partial<OmniMap> | null | undefined): OmniMa
     },
     objectLayer: normalizeObjectLayer(input?.objectLayer, base.objectLayer),
     decorationLayer: normalizeObjectLayer(input?.decorationLayer, base.decorationLayer),
+    detailLayer: normalizeObjectLayer(input?.detailLayer, base.detailLayer),
     lightingLayer: normalizeObjectLayer(input?.lightingLayer, base.lightingLayer),
+    mechanicalLayer: normalizeObjectLayer(input?.mechanicalLayer, base.mechanicalLayer),
     notesLayer: normalizeObjectLayer(input?.notesLayer, base.notesLayer),
     fogLayer: normalizeFogLayer(input?.fogLayer, base.fogLayer),
-    tokens: Array.isArray(input?.tokens) ? input.tokens.map(normalizeToken).filter(Boolean) as TabletopToken[] : []
+    tokens: Array.isArray(input?.tokens) ? input.tokens.map(normalizeToken).filter(Boolean) as TabletopToken[] : [],
+    prefabs: Array.isArray(input?.prefabs) ? input.prefabs.map(normalizePrefab).filter(Boolean) as MapPrefab[] : []
   };
 
   return next;
@@ -128,30 +135,64 @@ export function getTileCell(cells: TileCell[], x: number, y: number) {
   return cells.find((cell) => `${cell.x}:${cell.y}` === key) || null;
 }
 
-export function buildMapObject(assetId: string, x: number, y: number): MapObject {
-  const asset = getAsset(assetId);
+export function buildMapObject(assetId: string, x: number, y: number, layer?: MapLayerKey, zIndex = 0, tilesets?: OmniMap['tilesets']): MapObject {
+  const asset = getAsset(assetId, tilesets);
   const kind = asset?.kind === 'floor' || asset?.kind === 'wall' || asset?.kind === 'fog'
     ? 'prop'
     : asset?.kind || 'prop';
   const isLight = kind === 'light';
+  const objectLayer = layer || asset?.defaultLayer || getDefaultObjectLayer(kind);
   return {
     id: createId('obj'),
     kind,
     name: asset?.name || 'Objeto',
     assetId,
+    layer: objectLayer,
     x,
     y,
-    width: isLight ? 1 : 2,
-    height: isLight ? 1 : 2,
+    width: asset?.defaultWidth || (isLight ? 96 : 64),
+    height: asset?.defaultHeight || (isLight ? 96 : 64),
     rotation: 0,
+    scale: 1,
+    zIndex,
+    opacity: asset?.defaultOpacity ?? 1,
     visibleToPlayers: kind !== 'note',
+    hiddenFromPlayers: kind === 'note',
     locked: false,
+    blocksMovement: Boolean(asset?.defaultBlocksMovement ?? asset?.blocksMovement),
+    blocksVision: Boolean(asset?.defaultBlocksVision ?? asset?.blocksVision),
+    givesCover: Boolean(asset?.defaultGivesCover ?? asset?.givesCover),
+    interactable: Boolean((asset?.defaultInteractable ?? asset?.interactable) || kind === 'door' || kind === 'terminal'),
     color: asset?.color,
     note: '',
     light: isLight
-      ? { id: createId('light'), x, y, radius: 5, intensity: 0.55, color: asset?.color || '#8b5cf6' }
+      ? { id: createId('light'), x, y, radius: Math.max(asset?.defaultWidth || 96, asset?.defaultHeight || 96) * 1.3, intensity: 0.55, color: asset?.color || '#8b5cf6' }
       : undefined
   };
+}
+
+export function getDefaultObjectLayer(kind: MapObject['kind']): MapLayerKey {
+  if (kind === 'decal' || kind === 'shadow') return 'details';
+  if (kind === 'light') return 'lighting';
+  if (kind === 'note') return 'notes';
+  if (kind === 'zone') return 'mechanics';
+  return 'objects';
+}
+
+export function getObjectLayer(map: OmniMap, layer: MapLayerKey): ObjectLayer | null {
+  if (layer === 'objects') return map.objectLayer;
+  if (layer === 'decoration') return map.decorationLayer;
+  if (layer === 'details') return map.detailLayer;
+  if (layer === 'lighting') return map.lightingLayer;
+  if (layer === 'mechanics') return map.mechanicalLayer;
+  if (layer === 'notes') return map.notesLayer;
+  return null;
+}
+
+export function getAllMapObjects(map: OmniMap) {
+  return [map.decorationLayer, map.objectLayer, map.detailLayer, map.lightingLayer, map.mechanicalLayer, map.notesLayer]
+    .flatMap((layer) => layer.objects)
+    .sort((left, right) => left.zIndex - right.zIndex);
 }
 
 function normalizeTileLayer(layer: Partial<TileLayer> | undefined, fallback: TileLayer): TileLayer {
@@ -182,6 +223,31 @@ function normalizeObjectLayer(layer: Partial<ObjectLayer> | undefined, fallback:
   };
 }
 
+function normalizeTilesets(tilesets: OmniMap['tilesets'] | undefined): OmniMap['tilesets'] {
+  const byId = new Map(DEFAULT_TILESETS.map((tileset) => [tileset.id, {
+    ...tileset,
+    assets: tileset.assets.map((asset) => ({ ...asset }))
+  }]));
+  if (Array.isArray(tilesets)) {
+    tilesets.forEach((tileset) => {
+      const normalizedAssets = Array.isArray(tileset.assets)
+        ? tileset.assets.map((entry) => {
+          const normalized = normalizeAsset(entry);
+          const defaultVersion = getAsset(entry.id, DEFAULT_TILESETS);
+          return normalized?.imageUrl ? normalized : defaultVersion || normalized;
+        }).filter(Boolean) as OmniMap['tilesets'][number]['assets']
+        : [];
+      normalizedAssets.forEach((asset) => {
+        const id = String(tileset.id || normalizeTilesetId(asset.category));
+        const existing = byId.get(id) || { id, name: String(tileset.name || asset.category || 'Tileset'), assets: [] };
+        existing.assets = [asset, ...existing.assets.filter((entry) => entry.id !== asset.id)];
+        byId.set(id, existing);
+      });
+    });
+  }
+  return Array.from(byId.values()).filter((tileset) => tileset.assets.length);
+}
+
 function normalizeFogLayer(layer: Partial<FogLayer> | undefined, fallback: FogLayer): FogLayer {
   return {
     ...fallback,
@@ -208,22 +274,59 @@ function normalizeTileCell(cell: Partial<TileCell>) {
 
 function normalizeObject(object: Partial<MapObject>) {
   if (!object?.id) return null;
-  const kind = String(object.kind || 'prop') as MapObject['kind'];
+  const asset = getAsset(object.assetId);
+  const kind = String(object.kind || (asset?.kind === 'floor' || asset?.kind === 'wall' || asset?.kind === 'fog' ? 'prop' : asset?.kind) || 'prop') as MapObject['kind'];
+  const layer = normalizeLayer(object.layer || asset?.defaultLayer || getDefaultObjectLayer(kind));
+  const width = clampNumber(object.width, 4, 4000, 64);
+  const hasModernFields = object.scale !== undefined || object.zIndex !== undefined || object.opacity !== undefined || object.layer !== undefined;
+  const legacyLooksLikeGrid = !hasModernFields && Number(object.width || 0) <= 40 && Number(object.height || 0) <= 40 && Number(object.x || 0) < 200 && Number(object.y || 0) < 200;
+  const hiddenFromPlayers = Boolean(object.hiddenFromPlayers || object.visibleToPlayers === false || kind === 'note');
   return {
     id: String(object.id),
     kind,
-    name: String(object.name || 'Objeto'),
-    assetId: String(object.assetId || 'prop-crate'),
-    x: Number(object.x || 0),
-    y: Number(object.y || 0),
-    width: clampNumber(object.width, 0.25, 40, 2),
-    height: clampNumber(object.height, 0.25, 40, 2),
+    name: String(object.name || asset?.name || 'Objeto'),
+    assetId: String(object.assetId || asset?.id || 'crate-urban'),
+    layer,
+    parentId: object.parentId ? String(object.parentId) : undefined,
+    groupId: object.groupId ? String(object.groupId) : undefined,
+    x: legacyLooksLikeGrid ? Number(object.x || 0) * DEFAULT_GRID : Number(object.x || 0),
+    y: legacyLooksLikeGrid ? Number(object.y || 0) * DEFAULT_GRID : Number(object.y || 0),
+    width: legacyLooksLikeGrid ? width * DEFAULT_GRID : width,
+    height: legacyLooksLikeGrid ? clampNumber(object.height, 4, 4000, 64) * DEFAULT_GRID : clampNumber(object.height, 4, 4000, 64),
     rotation: Number(object.rotation || 0),
-    visibleToPlayers: object.visibleToPlayers !== false,
+    scale: clampNumber(object.scale, 0.1, 8, 1),
+    zIndex: Number(object.zIndex || 0),
+    opacity: clampNumber(object.opacity, 0, 1, 1),
+    visibleToPlayers: !hiddenFromPlayers,
+    hiddenFromPlayers,
     locked: Boolean(object.locked),
+    blocksMovement: Boolean(object.blocksMovement),
+    blocksVision: Boolean(object.blocksVision),
+    givesCover: Boolean(object.givesCover),
+    interactable: Boolean(object.interactable),
     color: object.color ? String(object.color) : undefined,
     note: object.note ? String(object.note) : '',
     light: object.light
+  };
+}
+
+function normalizePrefab(prefab: Partial<MapPrefab>) {
+  if (!prefab?.id) return null;
+  return {
+    id: String(prefab.id),
+    name: String(prefab.name || 'Prefab'),
+    createdAt: String(prefab.createdAt || new Date().toISOString()),
+    objects: Array.isArray(prefab.objects)
+      ? prefab.objects.map((entry) => {
+        const normalized = normalizeObject(entry.object || {});
+        if (!normalized) return null;
+        return {
+          object: normalized,
+          offsetX: Number(entry.offsetX || 0),
+          offsetY: Number(entry.offsetY || 0)
+        };
+      }).filter(Boolean) as MapPrefab['objects']
+      : []
   };
 }
 
@@ -249,8 +352,12 @@ function normalizeMode(value: unknown): TabletopMode {
 }
 
 function normalizeLayer(value: unknown): MapLayerKey {
-  const valid: MapLayerKey[] = ['floor', 'walls', 'objects', 'decoration', 'lighting', 'collision', 'fog', 'notes', 'tokens'];
+  const valid: MapLayerKey[] = ['floor', 'walls', 'objects', 'decoration', 'details', 'lighting', 'mechanics', 'collision', 'fog', 'notes', 'tokens'];
   return valid.includes(value as MapLayerKey) ? value as MapLayerKey : 'floor';
+}
+
+function normalizeTilesetId(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'custom-assets';
 }
 
 function clampInteger(value: unknown, min: number, max: number) {

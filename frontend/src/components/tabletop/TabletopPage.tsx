@@ -27,6 +27,8 @@ export function TabletopPage({
   const newMap = useTabletopStore((state) => state.newMap);
   const setMapMeta = useTabletopStore((state) => state.setMapMeta);
   const clearDirty = useTabletopStore((state) => state.clearDirty);
+  const insertPrefab = useTabletopStore((state) => state.insertPrefab);
+  const removePrefab = useTabletopStore((state) => state.removePrefab);
   const [message, setMessage] = useState('');
   const availableTokens = useMemo(() => buildAvailableTokens(characters, combatants), [characters, combatants]);
 
@@ -113,7 +115,16 @@ export function TabletopPage({
       <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
         <div className="grid content-start gap-4">
           <MapSettings map={map} onChange={setMapMeta} />
-          {map.mode === 'build' ? <AssetPalette /> : <TokenPanel tokens={availableTokens} />}
+          {map.mode === 'build' ? (
+            <>
+              <AssetPalette />
+              <PrefabPanel
+                map={map}
+                onInsert={(prefabId) => insertPrefab(prefabId, map.gridSize * 2, map.gridSize * 2)}
+                onRemove={removePrefab}
+              />
+            </>
+          ) : <TokenPanel tokens={availableTokens} />}
           <MapListPanel
             maps={maps}
             activeMapId={map.id}
@@ -189,8 +200,41 @@ function SessionReadout({ map }: { map: OmniMap }) {
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
         <MiniStat label="Tokens" value={map.tokens.length} />
         <MiniStat label="Ocultos" value={hiddenTokens} />
-        <MiniStat label="Objetos" value={map.objectLayer.objects.length + map.decorationLayer.objects.length} />
+        <MiniStat label="Objetos" value={map.objectLayer.objects.length + map.decorationLayer.objects.length + map.detailLayer.objects.length} />
         <MiniStat label="Fog" value={map.fogLayer.revealedCells.length} />
+      </div>
+    </section>
+  );
+}
+
+function PrefabPanel({
+  map,
+  onInsert,
+  onRemove
+}: {
+  map: OmniMap;
+  onInsert(prefabId: string): void;
+  onRemove(prefabId: string): void;
+}) {
+  return (
+    <section className="rounded-lg border border-line bg-panel/90 p-3">
+      <p className="text-xs font-black uppercase text-violet">Prefabs</p>
+      <div className="mt-3 grid gap-2">
+        {(map.prefabs || []).map((prefab) => (
+          <div key={prefab.id} className="rounded-lg border border-line bg-white/5 p-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <strong className="block truncate text-sm text-textMain">{prefab.name}</strong>
+                <span className="text-xs text-textMuted">{prefab.objects.length} objeto(s)</span>
+              </div>
+              <div className="flex gap-1">
+                <Button type="button" onClick={() => onInsert(prefab.id)}>+</Button>
+                <Button type="button" tone="danger" onClick={() => onRemove(prefab.id)}>x</Button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {!map.prefabs?.length ? <p className="text-sm text-textMuted">Selecione objetos e salve uma composicao no inspetor.</p> : null}
       </div>
     </section>
   );

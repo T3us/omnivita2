@@ -1,14 +1,18 @@
 import type {
   Asset,
+  AssetDefinition,
   FogLayer,
   LightSource,
   MapLayerKey,
   MapObject,
   MapObjectKind,
+  MapPrefab,
+  MapPrefabObject,
   MapSummary,
   MapTool,
   ObjectLayer,
   OmniMap,
+  SnapMode,
   TabletopMode,
   TabletopToken,
   TabletopTokenKind,
@@ -19,15 +23,19 @@ import type {
 
 export type {
   Asset,
+  AssetDefinition,
   FogLayer,
   LightSource,
   MapLayerKey,
   MapObject,
   MapObjectKind,
+  MapPrefab,
+  MapPrefabObject,
   MapSummary,
   MapTool,
   ObjectLayer,
   OmniMap,
+  SnapMode,
   TabletopMode,
   TabletopToken,
   TabletopTokenKind,
@@ -37,7 +45,7 @@ export type {
 };
 
 export type TileLayerKey = 'floor' | 'walls' | 'collision';
-export type ObjectLayerKey = 'objects' | 'decoration' | 'lighting' | 'notes';
+export type ObjectLayerKey = 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'notes';
 
 export interface AvailableTabletopToken {
   id: string;

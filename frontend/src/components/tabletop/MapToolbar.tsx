@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Button, Badge } from '../Ui';
 import { useTabletopStore } from './mapStore';
 import type { MapTool, TabletopMode } from './types';
+import type { SnapMode } from './types';
 
 const buildTools: Array<{ id: MapTool; label: string }> = [
   { id: 'select', label: 'Selecionar' },
@@ -25,6 +26,13 @@ const sessionTools: Array<{ id: MapTool; label: string }> = [
   { id: 'select', label: 'Selecionar' }
 ];
 
+const snapModes: Array<{ id: SnapMode; label: string }> = [
+  { id: 'grid', label: 'Grid' },
+  { id: 'fine', label: '4px' },
+  { id: 'free', label: 'Livre' },
+  { id: 'object', label: 'Objeto' }
+];
+
 export function MapToolbar({
   saving,
   onNew,
@@ -39,10 +47,12 @@ export function MapToolbar({
   const map = useTabletopStore((state) => state.map);
   const tool = useTabletopStore((state) => state.tool);
   const zoom = useTabletopStore((state) => state.zoom);
+  const snapMode = useTabletopStore((state) => state.snapMode);
   const dirty = useTabletopStore((state) => state.dirty);
   const setMode = useTabletopStore((state) => state.setMode);
   const setTool = useTabletopStore((state) => state.setTool);
   const setZoom = useTabletopStore((state) => state.setZoom);
+  const setSnapMode = useTabletopStore((state) => state.setSnapMode);
   const tools = map.mode === 'build' ? buildTools : sessionTools;
 
   return (
@@ -76,18 +86,35 @@ export function MapToolbar({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 text-sm text-textMuted">
-          <span>Zoom</span>
-          <input
-            className="w-32 accent-vita"
-            type="range"
-            min="0.5"
-            max="2.5"
-            step="0.1"
-            value={zoom}
-            onChange={(event) => setZoom(Number(event.target.value))}
-          />
-          <span className="w-12 text-right">{Math.round(zoom * 100)}%</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1">
+            {snapModes.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                className={clsx(
+                  'min-h-8 rounded-lg border px-2 text-xs font-bold',
+                  snapMode === entry.id ? 'border-vita/60 bg-vita/20 text-textMain' : 'border-line bg-white/5 text-textMuted'
+                )}
+                onClick={() => setSnapMode(entry.id)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 text-sm text-textMuted">
+            <span>Zoom</span>
+            <input
+              className="w-32 accent-vita"
+              type="range"
+              min="0.5"
+              max="2.5"
+              step="0.1"
+              value={zoom}
+              onChange={(event) => setZoom(Number(event.target.value))}
+            />
+            <span className="w-12 text-right">{Math.round(zoom * 100)}%</span>
+          </div>
         </div>
       </div>
     </section>

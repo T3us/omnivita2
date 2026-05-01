@@ -5,8 +5,10 @@ const layers: Array<{ id: MapLayerKey; label: string }> = [
   { id: 'tokens', label: 'Tokens' },
   { id: 'notes', label: 'Notas' },
   { id: 'fog', label: 'Fog' },
+  { id: 'mechanics', label: 'Mecanica' },
   { id: 'lighting', label: 'Luzes' },
   { id: 'collision', label: 'Colisao' },
+  { id: 'details', label: 'Detalhes' },
   { id: 'objects', label: 'Objetos' },
   { id: 'decoration', label: 'Decoracao' },
   { id: 'walls', label: 'Paredes' },
@@ -63,7 +65,9 @@ function getLayerState(map: ReturnType<typeof useTabletopStore.getState>['map'],
   if (layer === 'floor' || layer === 'walls' || layer === 'collision') return map.tileLayers[layer];
   if (layer === 'objects') return map.objectLayer;
   if (layer === 'decoration') return map.decorationLayer;
+  if (layer === 'details') return map.detailLayer;
   if (layer === 'lighting') return map.lightingLayer;
+  if (layer === 'mechanics') return map.mechanicalLayer;
   if (layer === 'notes') return map.notesLayer;
   if (layer === 'fog') return map.fogLayer;
   return { visible: true };
