@@ -35,6 +35,40 @@ export function LayerPanel() {
           </button>
         ) : null}
       </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <button
+          className="rounded border border-line bg-white/5 px-2 py-1 text-[11px] font-bold text-textMuted hover:bg-white/10"
+          type="button"
+          onClick={() => {
+            setSoloLayer(map.activeLayer);
+          }}
+        >
+          Isolar
+        </button>
+        <button
+          className="rounded border border-line bg-white/5 px-2 py-1 text-[11px] font-bold text-textMuted hover:bg-white/10"
+          type="button"
+          onClick={() => {
+            setSoloLayer(null);
+            layers.forEach((layer) => {
+              if (layer.id !== 'tokens') setLayerVisibility(layer.id, true);
+            });
+          }}
+        >
+          Mostrar tudo
+        </button>
+        <button
+          className="rounded border border-line bg-white/5 px-2 py-1 text-[11px] font-bold text-textMuted hover:bg-white/10"
+          type="button"
+          onClick={() => {
+            layers.forEach((layer) => {
+              if (layer.id !== 'tokens') setLayerLocked(layer.id, layer.id !== map.activeLayer);
+            });
+          }}
+        >
+          Travar outras
+        </button>
+      </div>
       <div className="mt-3 grid gap-2">
         {layers.map((layer) => {
           const state = getLayerState(map, layer.id);

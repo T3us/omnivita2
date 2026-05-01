@@ -1,8 +1,8 @@
 import clsx from 'clsx';
 import { useMemo, useState } from 'react';
-import { getAllAssets, makeCustomAsset } from './assets';
+import { ASSET_THEME_LABELS, ASSET_TYPE_LABELS, getAllAssets, makeCustomAsset } from './assets';
 import { useTabletopStore } from './mapStore';
-import type { Asset, MapLayerKey } from './types';
+import type { Asset, AssetTheme, AssetTypeCategory, MapLayerKey, MapTool, SnapMode } from './types';
 
 const layerOptions: Array<{ id: MapLayerKey; label: string }> = [
   { id: 'floor', label: 'Piso' },
@@ -28,13 +28,16 @@ export function AssetPalette() {
   const setTool = useTabletopStore((state) => state.setTool);
   const addCustomAsset = useTabletopStore((state) => state.addCustomAsset);
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('Todos');
+  const [typeFilter, setTypeFilter] = useState<AssetTypeCategory | 'Todos' | 'Favoritos' | 'Recentes'>('Todos');
+  const [themeFilter, setThemeFilter] = useState<AssetTheme | 'Todos'>('Todos');
   const [importOpen, setImportOpen] = useState(false);
   const [importImage, setImportImage] = useState('');
   const [importName, setImportName] = useState('');
-  const [importCategory, setImportCategory] = useState('Customizados');
+  const [importType, setImportType] = useState<AssetTypeCategory>('prop');
+  const [importTheme, setImportTheme] = useState<AssetTheme>('generico');
   const [importTags, setImportTags] = useState('');
   const [importLayer, setImportLayer] = useState<MapLayerKey>('objects');
+  const [importSnapMode, setImportSnapMode] = useState<SnapMode>('free');
   const [importWidth, setImportWidth] = useState(64);
   const [importHeight, setImportHeight] = useState(64);
   const [importBlocksMovement, setImportBlocksMovement] = useState(false);
@@ -42,19 +45,19 @@ export function AssetPalette() {
   const [importGivesCover, setImportGivesCover] = useState(false);
 
   const assets = useMemo(() => getAllAssets(map.tilesets), [map.tilesets]);
-  const categories = useMemo(() => ['Todos', 'Favoritos', 'Recentes', ...Array.from(new Set(assets.map((asset) => asset.category || 'Outros')))], [assets]);
   const filteredAssets = assets.filter((asset) => {
-    const haystack = `${asset.name} ${asset.category || ''} ${(asset.tags || []).join(' ')}`.toLowerCase();
+    const haystack = `${asset.name} ${asset.category || ''} ${asset.typeCategory || ''} ${asset.theme || ''} ${(asset.tags || []).join(' ')}`.toLowerCase();
     const matchesSearch = !search.trim() || haystack.includes(search.trim().toLowerCase());
-    const matchesCategory = category === 'Todos'
-      || (category === 'Favoritos' && favoriteAssetIds.includes(asset.id))
-      || (category === 'Recentes' && recentAssetIds.includes(asset.id))
-      || asset.category === category;
-    return matchesSearch && matchesCategory;
+    const matchesType = typeFilter === 'Todos'
+      || (typeFilter === 'Favoritos' && favoriteAssetIds.includes(asset.id))
+      || (typeFilter === 'Recentes' && recentAssetIds.includes(asset.id))
+      || asset.typeCategory === typeFilter;
+    const matchesTheme = themeFilter === 'Todos' || asset.theme === themeFilter;
+    return matchesSearch && matchesType && matchesTheme;
   }).sort((left, right) => {
     const leftRecent = recentAssetIds.indexOf(left.id);
     const rightRecent = recentAssetIds.indexOf(right.id);
-    if (category === 'Recentes') return (leftRecent < 0 ? 999 : leftRecent) - (rightRecent < 0 ? 999 : rightRecent);
+    if (typeFilter === 'Recentes') return (leftRecent < 0 ? 999 : leftRecent) - (rightRecent < 0 ? 999 : rightRecent);
     return String(left.name).localeCompare(String(right.name), 'pt-BR');
   });
 
@@ -94,9 +97,11 @@ export function AssetPalette() {
           <AssetImportForm
             image={importImage}
             name={importName}
-            category={importCategory}
+            typeCategory={importType}
+            theme={importTheme}
             tags={importTags}
             layer={importLayer}
+            snapMode={importSnapMode}
             width={importWidth}
             height={importHeight}
             blocksMovement={importBlocksMovement}
@@ -104,9 +109,11 @@ export function AssetPalette() {
             givesCover={importGivesCover}
             onImage={setImportImage}
             onName={setImportName}
-            onCategory={setImportCategory}
+            onTypeCategory={setImportType}
+            onTheme={setImportTheme}
             onTags={setImportTags}
             onLayer={setImportLayer}
+            onSnapMode={setImportSnapMode}
             onWidth={setImportWidth}
             onHeight={setImportHeight}
             onBlocksMovement={setImportBlocksMovement}
@@ -116,13 +123,16 @@ export function AssetPalette() {
               if (!importImage || !importName.trim()) return;
               const customAsset = makeCustomAsset({
                 name: importName.trim(),
-                category: importCategory.trim() || 'Customizados',
+                category: ASSET_TYPE_LABELS[importType],
+                typeCategory: importType,
+                theme: importTheme,
                 tags: importTags.split(',').map((tag) => tag.trim()).filter(Boolean),
                 imageUrl: importImage,
                 thumbnailUrl: importImage,
                 defaultLayer: importLayer,
                 defaultWidth: importWidth,
                 defaultHeight: importHeight,
+                defaultSnapMode: importSnapMode,
                 defaultBlocksMovement: importBlocksMovement,
                 defaultBlocksVision: importBlocksVision,
                 defaultGivesCover: importGivesCover,
@@ -136,7 +146,7 @@ export function AssetPalette() {
                 interactable: false
               });
               addCustomAsset(customAsset);
-              setCategory(customAsset.category);
+              setTypeFilter(customAsset.typeCategory || 'prop');
               setImportImage('');
               setImportName('');
               setImportTags('');
@@ -151,10 +161,21 @@ export function AssetPalette() {
         />
         <select
           className="w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-sm text-textMain"
-          value={category}
-          onChange={(event) => setCategory(event.target.value)}
+          value={typeFilter}
+          onChange={(event) => setTypeFilter(event.target.value as typeof typeFilter)}
         >
-          {categories.map((entry) => <option key={entry} value={entry}>{entry}</option>)}
+          <option value="Todos">Todos os tipos</option>
+          <option value="Favoritos">Favoritos</option>
+          <option value="Recentes">Recentes</option>
+          {Object.entries(ASSET_TYPE_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+        <select
+          className="w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-sm text-textMain"
+          value={themeFilter}
+          onChange={(event) => setThemeFilter(event.target.value as typeof themeFilter)}
+        >
+          <option value="Todos">Todos os temas</option>
+          {Object.entries(ASSET_THEME_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select>
       </div>
 
@@ -168,10 +189,7 @@ export function AssetPalette() {
             onClick={() => {
               setSelectedAsset(asset.id);
               if (asset.defaultLayer !== 'fog' && asset.defaultLayer !== 'tokens') setActiveLayer(asset.defaultLayer);
-              if (asset.defaultLayer === 'floor') setTool('brush');
-              else if (asset.defaultLayer === 'walls') setTool('wall');
-              else if (asset.defaultLayer === 'fog') setTool('fog');
-              else setTool('object');
+              setTool(getToolForAsset(asset));
             }}
             onFavorite={() => toggleFavoriteAsset(asset.id)}
           />
@@ -185,9 +203,11 @@ export function AssetPalette() {
 function AssetImportForm({
   image,
   name,
-  category,
+  typeCategory,
+  theme,
   tags,
   layer,
+  snapMode,
   width,
   height,
   blocksMovement,
@@ -195,9 +215,11 @@ function AssetImportForm({
   givesCover,
   onImage,
   onName,
-  onCategory,
+  onTypeCategory,
+  onTheme,
   onTags,
   onLayer,
+  onSnapMode,
   onWidth,
   onHeight,
   onBlocksMovement,
@@ -207,9 +229,11 @@ function AssetImportForm({
 }: {
   image: string;
   name: string;
-  category: string;
+  typeCategory: AssetTypeCategory;
+  theme: AssetTheme;
   tags: string;
   layer: MapLayerKey;
+  snapMode: SnapMode;
   width: number;
   height: number;
   blocksMovement: boolean;
@@ -217,9 +241,11 @@ function AssetImportForm({
   givesCover: boolean;
   onImage(value: string): void;
   onName(value: string): void;
-  onCategory(value: string): void;
+  onTypeCategory(value: AssetTypeCategory): void;
+  onTheme(value: AssetTheme): void;
   onTags(value: string): void;
   onLayer(value: MapLayerKey): void;
+  onSnapMode(value: SnapMode): void;
   onWidth(value: number): void;
   onHeight(value: number): void;
   onBlocksMovement(value: boolean): void;
@@ -255,9 +281,19 @@ function AssetImportForm({
       ) : null}
       <input className="rounded-lg border border-line bg-white/5 px-2 py-2 text-sm text-textMain" value={name} placeholder="Nome do asset" onChange={(event) => onName(event.target.value)} />
       <div className="grid grid-cols-2 gap-2">
-        <input className="rounded-lg border border-line bg-white/5 px-2 py-2 text-sm text-textMain" value={category} placeholder="Categoria" onChange={(event) => onCategory(event.target.value)} />
+        <select className="rounded-lg border border-line bg-white/5 px-2 py-2 text-sm text-textMain" value={typeCategory} onChange={(event) => onTypeCategory(event.target.value as AssetTypeCategory)}>
+          {Object.entries(ASSET_TYPE_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+        <select className="rounded-lg border border-line bg-white/5 px-2 py-2 text-sm text-textMain" value={theme} onChange={(event) => onTheme(event.target.value as AssetTheme)}>
+          {Object.entries(ASSET_THEME_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
         <select className="rounded-lg border border-line bg-white/5 px-2 py-2 text-sm text-textMain" value={layer} onChange={(event) => onLayer(event.target.value as MapLayerKey)}>
           {layerOptions.filter((entry) => entry.id !== 'tokens').map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+        </select>
+        <select className="rounded-lg border border-line bg-white/5 px-2 py-2 text-sm text-textMain" value={snapMode} onChange={(event) => onSnapMode(event.target.value as SnapMode)}>
+          <option value="free">Livre</option>
+          <option value="fine">Fino 4px</option>
+          <option value="grid">Grid</option>
         </select>
         <input className="rounded-lg border border-line bg-white/5 px-2 py-2 text-sm text-textMain" type="number" min={4} value={width} onChange={(event) => onWidth(Number(event.target.value))} />
         <input className="rounded-lg border border-line bg-white/5 px-2 py-2 text-sm text-textMain" type="number" min={4} value={height} onChange={(event) => onHeight(Number(event.target.value))} />
@@ -311,7 +347,8 @@ function AssetButton({
           <AssetPreview image={asset.thumbnailUrl || asset.imageUrl} alt={asset.name} selected={selected} />
         </span>
         <span className="mt-1 block truncate text-[11px] font-bold text-textMain">{asset.name}</span>
-        <span className="block truncate text-[10px] text-textMuted">{asset.category}</span>
+        <span className="block truncate text-[10px] text-textMuted">{ASSET_TYPE_LABELS[asset.typeCategory || 'prop']}</span>
+        <span className="block truncate text-[10px] text-textMuted">{ASSET_THEME_LABELS[asset.theme || 'generico']}</span>
       </button>
       <button
         type="button"
@@ -358,4 +395,17 @@ function inferKind(layer: MapLayerKey): Asset['kind'] {
   if (layer === 'fog') return 'fog';
   if (layer === 'mechanics') return 'zone';
   return 'prop';
+}
+
+function getToolForAsset(asset: Asset): MapTool {
+  if (asset.typeCategory === 'floor' || asset.defaultLayer === 'floor') return 'brush';
+  if (asset.typeCategory === 'wall' || asset.defaultLayer === 'walls') return 'wall';
+  if (asset.typeCategory === 'light' || asset.defaultLayer === 'lighting') return 'light';
+  if (asset.typeCategory === 'note' || asset.defaultLayer === 'notes') return 'note';
+  if (asset.typeCategory === 'fog' || asset.defaultLayer === 'fog') return 'fog';
+  if (asset.kind === 'door') return 'door';
+  if (asset.kind === 'cover') return 'cover';
+  if (asset.kind === 'terminal') return 'terminal';
+  if (asset.kind === 'zone') return 'zone';
+  return 'object';
 }

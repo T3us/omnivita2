@@ -27,6 +27,11 @@ export function ObjectInspector() {
   const groupSelectedObjects = useTabletopStore((state) => state.groupSelectedObjects);
   const ungroupSelectedObjects = useTabletopStore((state) => state.ungroupSelectedObjects);
   const saveSelectionAsPrefab = useTabletopStore((state) => state.saveSelectionAsPrefab);
+  const updateSelectedObjects = useTabletopStore((state) => state.updateSelectedObjects);
+  const removeSelectedObjects = useTabletopStore((state) => state.removeSelectedObjects);
+  const rotateSelectedObjects = useTabletopStore((state) => state.rotateSelectedObjects);
+  const alignSelectedObjects = useTabletopStore((state) => state.alignSelectedObjects);
+  const distributeSelectedObjects = useTabletopStore((state) => state.distributeSelectedObjects);
   const updateObject = useTabletopStore((state) => state.updateObject);
   const removeObject = useTabletopStore((state) => state.removeObject);
   const duplicateSelectedObjects = useTabletopStore((state) => state.duplicateSelectedObjects);
@@ -34,6 +39,64 @@ export function ObjectInspector() {
   const removeToken = useTabletopStore((state) => state.removeToken);
   const object = findObject(map, selectedObjectId);
   const token = map.tokens.find((entry) => entry.id === selectedTokenId) || null;
+
+  if (selectedObjectIds.length > 1) {
+    return (
+      <section className="rounded-lg border border-line bg-panel/90 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-black uppercase text-violet">Inspetor</p>
+          <span className="rounded-lg border border-line bg-white/5 px-2 py-1 text-xs text-textMuted">{selectedObjectIds.length} selecionados</span>
+        </div>
+        <div className="mt-3 grid gap-3">
+          <label className="text-sm font-semibold text-textMuted">
+            Camada em massa
+            <select
+              className="mt-1 w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-textMain"
+              onChange={(event) => updateSelectedObjects({ layer: event.target.value as MapLayerKey })}
+              defaultValue=""
+            >
+              <option value="" disabled>Escolher camada</option>
+              {objectLayers.map((layer) => <option key={layer.id} value={layer.id}>{layer.label}</option>)}
+            </select>
+          </label>
+          <div className="grid gap-2">
+            <Toggle label="Visivel para jogadores" checked onChange={(checked) => updateSelectedObjects({ hiddenFromPlayers: !checked, visibleToPlayers: checked })} />
+            <Toggle label="Travar selecao" checked={false} onChange={(locked) => updateSelectedObjects({ locked })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <NumberInput label="Opacidade" value={1} step={0.05} min={0} max={1} onChange={(opacity) => updateSelectedObjects({ opacity })} />
+            <NumberInput label="Rotacao +" value={15} step={5} onChange={(rotation) => rotateSelectedObjects(rotation)} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" onClick={duplicateSelectedObjects}>Duplicar</Button>
+            <Button type="button" tone="danger" onClick={removeSelectedObjects}>Deletar</Button>
+            <Button type="button" onClick={groupSelectedObjects}>Agrupar</Button>
+            <Button type="button" onClick={ungroupSelectedObjects}>Desagrupar</Button>
+            <Button type="button" onClick={bringForward}>Frente</Button>
+            <Button type="button" onClick={sendBackward}>Tras</Button>
+            <Button type="button" onClick={() => alignSelectedObjects('top')}>Alinhar topo</Button>
+            <Button type="button" onClick={() => alignSelectedObjects('center')}>Alinhar centro</Button>
+            <Button type="button" onClick={() => distributeSelectedObjects('horizontal')}>Distribuir H</Button>
+            <Button type="button" onClick={() => distributeSelectedObjects('vertical')}>Distribuir V</Button>
+            <Button type="button" onClick={() => rotateSelectedObjects(15)}>Girar +15</Button>
+            <Button type="button" onClick={() => rotateSelectedObjects(-15)}>Girar -15</Button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" onClick={placeOnSelectedParent}>Em cima do primeiro</Button>
+            <Button
+              type="button"
+              onClick={() => {
+                const name = window.prompt('Nome do prefab', 'Composicao');
+                if (name) saveSelectionAsPrefab(name);
+              }}
+            >
+              Salvar prefab
+            </Button>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   if (object) {
     const assets = getAllAssets(map.tilesets);
@@ -58,7 +121,7 @@ export function ObjectInspector() {
               </span>
               <div className="min-w-0">
                 <strong className="block truncate text-sm text-textMain">{asset.name}</strong>
-                <span className="text-xs text-textMuted">{asset.category}</span>
+                <span className="text-xs text-textMuted">{asset.category} • {asset.theme || 'generico'}</span>
               </div>
             </div>
           ) : null}
@@ -92,6 +155,18 @@ export function ObjectInspector() {
             <NumberInput label="zIndex" value={object.zIndex} step={1} min={0} onChange={(zIndex) => updateObject(object.id, { zIndex })} />
             <NumberInput label="Opacidade" value={object.opacity} step={0.05} min={0} max={1} onChange={(opacity) => updateObject(object.id, { opacity })} />
           </div>
+          <label className="text-sm font-semibold text-textMuted">
+            Snap do objeto
+            <select
+              className="mt-1 w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-textMain"
+              value={object.snapMode || 'free'}
+              onChange={(event) => updateObject(object.id, { snapMode: event.target.value as MapObject['snapMode'] })}
+            >
+              <option value="free">Livre</option>
+              <option value="fine">Fino 4px</option>
+              <option value="grid">Grid</option>
+            </select>
+          </label>
           <div className="grid gap-2">
             <Toggle label="Visivel para jogadores" checked={!object.hiddenFromPlayers} onChange={(checked) => updateObject(object.id, { hiddenFromPlayers: !checked, visibleToPlayers: checked })} />
             <Toggle label="Travar objeto" checked={object.locked} onChange={(locked) => updateObject(object.id, { locked })} />

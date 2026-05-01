@@ -149,11 +149,16 @@ export type MapTool = 'select' | 'brush' | 'wall' | 'collision' | 'erase' | 'obj
 export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
 export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
+export type EraseMode = 'activeLayer' | 'topVisible' | 'allUnlocked';
+export type AssetTypeCategory = 'floor' | 'wall' | 'door-window' | 'furniture' | 'prop' | 'detail' | 'light' | 'mechanic' | 'note' | 'fog';
+export type AssetTheme = 'cidade-baixo' | 'instituto' | 'laboratorio-canal' | 'zona-profunda' | 'urbano' | 'alienigena' | 'generico';
 
 export interface AssetDefinition {
   id: string;
   name: string;
   category: string;
+  typeCategory?: AssetTypeCategory;
+  theme?: AssetTheme;
   tags: string[];
   imageUrl: string;
   thumbnailUrl: string;
@@ -164,6 +169,7 @@ export interface AssetDefinition {
   defaultBlocksVision: boolean;
   defaultGivesCover: boolean;
   kind?: MapObjectKind | 'floor' | 'wall' | 'fog';
+  defaultSnapMode?: SnapMode;
   defaultOpacity?: number;
   defaultInteractable?: boolean;
   color?: string;
@@ -236,6 +242,7 @@ export interface MapObject {
   rotation: number;
   zIndex: number;
   layer: MapLayerKey;
+  snapMode?: SnapMode;
   opacity: number;
   locked: boolean;
   hiddenFromPlayers: boolean;

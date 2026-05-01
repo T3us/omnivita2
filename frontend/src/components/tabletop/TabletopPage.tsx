@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import type { CharacterSheet, Combatant } from '../../api/types';
 import { hydrateCharacter } from '../../domain/system';
 import { Badge, Button, Card } from '../Ui';
+import { ASSET_TYPE_LABELS, getAsset } from './assets';
 import { AssetPalette } from './AssetPalette';
 import { LayerPanel } from './LayerPanel';
 import { MapListPanel } from './MapListPanel';
@@ -12,7 +13,7 @@ import { MapToolbar } from './MapToolbar';
 import { useTabletopStore } from './mapStore';
 import { ObjectInspector } from './ObjectInspector';
 import { TokenPanel } from './TokenPanel';
-import type { AvailableTabletopToken, OmniMap } from './types';
+import type { AvailableTabletopToken, EraseMode, MapLayerKey, MapTool, OmniMap, SnapMode } from './types';
 
 export function TabletopPage({
   characters,
@@ -29,8 +30,16 @@ export function TabletopPage({
   const clearDirty = useTabletopStore((state) => state.clearDirty);
   const insertPrefab = useTabletopStore((state) => state.insertPrefab);
   const removePrefab = useTabletopStore((state) => state.removePrefab);
+  const tool = useTabletopStore((state) => state.tool);
+  const brushSize = useTabletopStore((state) => state.brushSize);
+  const eraseMode = useTabletopStore((state) => state.eraseMode);
+  const snapMode = useTabletopStore((state) => state.snapMode);
+  const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
   const [message, setMessage] = useState('');
+  const [leftTab, setLeftTab] = useState<'map' | 'assets' | 'tools'>('assets');
+  const [rightTab, setRightTab] = useState<'layers' | 'inspector' | 'session'>('layers');
   const availableTokens = useMemo(() => buildAvailableTokens(characters, combatants), [characters, combatants]);
+  const selectedAsset = getAsset(selectedAssetId, map.tilesets);
 
   const mapsQuery = useQuery({
     queryKey: ['maps'],
@@ -114,8 +123,27 @@ export function TabletopPage({
 
       <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
         <div className="grid content-start gap-4">
-          <MapSettings map={map} onChange={setMapMeta} />
-          {map.mode === 'build' ? (
+          <PanelTabs
+            value={leftTab}
+            onChange={(value) => setLeftTab(value as typeof leftTab)}
+            tabs={[
+              { id: 'map', label: 'Mapa' },
+              { id: 'assets', label: 'Assets' },
+              { id: 'tools', label: 'Ferramentas' }
+            ]}
+          />
+          {leftTab === 'map' ? (
+            <>
+              <MapSettings map={map} onChange={setMapMeta} />
+              <MapListPanel
+                maps={maps}
+                activeMapId={map.id}
+                loading={mapsQuery.isLoading || loadMutation.isPending}
+                onLoad={(mapId) => loadMutation.mutate(mapId)}
+              />
+            </>
+          ) : null}
+          {leftTab === 'assets' && map.mode === 'build' ? (
             <>
               <AssetPalette />
               <PrefabPanel
@@ -124,22 +152,42 @@ export function TabletopPage({
                 onRemove={removePrefab}
               />
             </>
-          ) : <TokenPanel tokens={availableTokens} />}
-          <MapListPanel
-            maps={maps}
-            activeMapId={map.id}
-            loading={mapsQuery.isLoading || loadMutation.isPending}
-            onLoad={(mapId) => loadMutation.mutate(mapId)}
+          ) : null}
+          {leftTab === 'assets' && map.mode !== 'build' ? <TokenPanel tokens={availableTokens} /> : null}
+          {leftTab === 'tools' ? <ShortcutPanel /> : null}
+        </div>
+
+        <div className="grid content-start gap-2">
+          <MapStage />
+          <StatusBar
+            tool={tool}
+            layer={map.activeLayer}
+            assetName={selectedAsset?.name || '-'}
+            assetType={selectedAsset?.typeCategory ? ASSET_TYPE_LABELS[selectedAsset.typeCategory] : '-'}
+            brushSize={brushSize}
+            eraseMode={eraseMode}
+            snapMode={snapMode}
           />
         </div>
 
-        <MapStage />
-
         <div className="grid content-start gap-4">
-          <LayerPanel />
-          {map.mode === 'session' ? <TokenPanel tokens={availableTokens} /> : null}
-          <ObjectInspector />
-          <SessionReadout map={map} />
+          <PanelTabs
+            value={rightTab}
+            onChange={(value) => setRightTab(value as typeof rightTab)}
+            tabs={[
+              { id: 'layers', label: 'Camadas' },
+              { id: 'inspector', label: 'Inspetor' },
+              { id: 'session', label: 'Sessao' }
+            ]}
+          />
+          {rightTab === 'layers' ? <LayerPanel /> : null}
+          {rightTab === 'inspector' ? <ObjectInspector /> : null}
+          {rightTab === 'session' ? (
+            <>
+              {map.mode === 'session' ? <TokenPanel tokens={availableTokens} /> : null}
+              <SessionReadout map={map} />
+            </>
+          ) : null}
         </div>
       </div>
     </div>
@@ -188,6 +236,94 @@ function NumberField({ label, value, min, max, onChange }: { label: string; valu
         onChange={(event) => onChange(Number(event.target.value))}
       />
     </label>
+  );
+}
+
+function PanelTabs<T extends string>({
+  value,
+  tabs,
+  onChange
+}: {
+  value: T;
+  tabs: Array<{ id: T; label: string }>;
+  onChange(value: T): void;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-2 rounded-lg border border-line bg-panel/90 p-2">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          className={`rounded-lg border px-2 py-2 text-sm font-black transition ${value === tab.id ? 'border-vita/60 bg-vita/20 text-textMain' : 'border-line bg-white/5 text-textMuted hover:bg-white/10'}`}
+          onClick={() => onChange(tab.id)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function StatusBar({
+  tool,
+  layer,
+  assetName,
+  assetType,
+  brushSize,
+  eraseMode,
+  snapMode
+}: {
+  tool: MapTool;
+  layer: MapLayerKey;
+  assetName: string;
+  assetType: string;
+  brushSize: number;
+  eraseMode: EraseMode;
+  snapMode: SnapMode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel/90 px-3 py-2 text-sm text-textMuted">
+      <StatusPill label="Ferramenta" value={tool} />
+      <StatusPill label="Camada" value={layer} />
+      <StatusPill label="Asset" value={`${assetName} (${assetType})`} />
+      <StatusPill label="Brush" value={`${brushSize}x${brushSize}`} />
+      <StatusPill label="Apagar" value={eraseModeLabel(eraseMode)} />
+      <StatusPill label="Snap" value={snapMode === 'fine' ? 'Fino' : snapMode === 'grid' ? 'Grid' : 'Livre'} />
+    </div>
+  );
+}
+
+function StatusPill({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="rounded-lg border border-line bg-white/5 px-2 py-1">
+      <span className="font-bold text-violet">{label}: </span>
+      <span className="text-textMain">{value}</span>
+    </span>
+  );
+}
+
+function eraseModeLabel(mode: EraseMode) {
+  if (mode === 'activeLayer') return 'Camada ativa';
+  if (mode === 'allUnlocked') return 'Todas livres';
+  return 'Topo visivel';
+}
+
+function ShortcutPanel() {
+  const lines = [
+    'V selecionar, B piso, W parede, O objeto',
+    'L luz, N nota, F fog, C colisao, E apagar',
+    'Delete remove, Ctrl+D duplica, Ctrl+Z desfaz',
+    'R gira +15, Shift+R gira -15, Q gira -5',
+    'Setas movem 1px, Alt+setas 4px, Shift+setas 1 celula',
+    '[ e ] mudam brush, G alterna grid, Shift+L trava camada'
+  ];
+  return (
+    <section className="rounded-lg border border-line bg-panel/90 p-3">
+      <p className="text-xs font-black uppercase text-violet">Comandos</p>
+      <div className="mt-3 grid gap-2 text-sm text-textMuted">
+        {lines.map((line) => <p key={line}>{line}</p>)}
+      </div>
+    </section>
   );
 }
 

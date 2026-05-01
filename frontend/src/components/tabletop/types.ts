@@ -1,6 +1,9 @@
 import type {
   Asset,
   AssetDefinition,
+  AssetTheme,
+  AssetTypeCategory,
+  EraseMode,
   FogLayer,
   LightSource,
   MapLayerKey,
@@ -24,6 +27,9 @@ import type {
 export type {
   Asset,
   AssetDefinition,
+  AssetTheme,
+  AssetTypeCategory,
+  EraseMode,
   FogLayer,
   LightSource,
   MapLayerKey,

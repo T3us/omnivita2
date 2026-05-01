@@ -5,7 +5,7 @@ import type { DragEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { getAsset } from './assets';
 import { useTabletopStore } from './mapStore';
-import type { MapLayerKey, MapObject, MapTool, ObjectLayer, OmniMap, TabletopToken, TileLayer } from './types';
+import type { MapLayerKey, MapObject, MapTool, ObjectLayer, OmniMap, SnapMode, TabletopToken, TileLayer } from './types';
 
 const GRID_LINE = 'rgba(196,181,253,0.13)';
 
@@ -14,7 +14,6 @@ export function MapStage() {
   const tool = useTabletopStore((state) => state.tool);
   const zoom = useTabletopStore((state) => state.zoom);
   const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
-  const selectedObjectId = useTabletopStore((state) => state.selectedObjectId);
   const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
   const selectedTokenId = useTabletopStore((state) => state.selectedTokenId);
   const brushSize = useTabletopStore((state) => state.brushSize);
@@ -23,9 +22,11 @@ export function MapStage() {
   const soloLayer = useTabletopStore((state) => state.soloLayer);
   const paintBrush = useTabletopStore((state) => state.paintBrush);
   const eraseBrush = useTabletopStore((state) => state.eraseBrush);
+  const eraseBrushAtPoint = useTabletopStore((state) => state.eraseBrushAtPoint);
   const addObject = useTabletopStore((state) => state.addObject);
   const updateObject = useTabletopStore((state) => state.updateObject);
   const selectObject = useTabletopStore((state) => state.selectObject);
+  const selectObjectsInRect = useTabletopStore((state) => state.selectObjectsInRect);
   const clearObjectSelection = useTabletopStore((state) => state.clearObjectSelection);
   const moveSelectedObjects = useTabletopStore((state) => state.moveSelectedObjects);
   const moveToken = useTabletopStore((state) => state.moveToken);
@@ -34,11 +35,13 @@ export function MapStage() {
   const setTransforming = useTabletopStore((state) => state.setTransforming);
   const viewportRef = useRef<HTMLDivElement>(null);
   const paintingRef = useRef(false);
+  const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const wallLineModeRef = useRef(false);
   const strokeStartRef = useRef<{ x: number; y: number } | null>(null);
   const strokeCellsRef = useRef(new Set<string>());
   const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
+  const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const stageWidth = map.width * map.gridSize * zoom;
   const stageHeight = map.height * map.gridSize * zoom;
@@ -54,7 +57,11 @@ export function MapStage() {
     if (map.mode !== 'build') return;
 
     if (tool === 'select') {
-      clearObjectSelection();
+      if (isEmptySelectionTarget(event.target)) {
+        if (!('shiftKey' in event.evt && event.evt.shiftKey)) clearObjectSelection();
+        selectionStartRef.current = pointer;
+        setSelectionBox({ x: pointer.x, y: pointer.y, width: 0, height: 0 });
+      }
       return;
     }
 
@@ -64,12 +71,13 @@ export function MapStage() {
       strokeStartRef.current = cell;
       wallLineModeRef.current = tool === 'wall' && Boolean('shiftKey' in event.evt && event.evt.shiftKey);
       strokeCellsRef.current = new Set();
-      paintStrokeCell(cell);
+      paintStrokeCell(cell, pointer);
       return;
     }
 
-    if (isPlaceTool(tool) && isEmptyPlacementTarget(event.target)) {
-      addObject(selectedAssetId, pointer.x, pointer.y, selectedObjectId);
+    if (isPlaceTool(tool)) {
+      const parentId = 'altKey' in event.evt && event.evt.altKey ? getObjectIdFromTarget(event.target) : undefined;
+      addObject(selectedAssetId, pointer.x, pointer.y, parentId);
     }
   }
 
@@ -80,22 +88,39 @@ export function MapStage() {
     const cell = pointerToCell(pointer, map);
     setHoverPoint(pointer);
     setHoverCell(cell);
+    if (tool === 'select' && selectionStartRef.current) {
+      setSelectionBox({
+        x: selectionStartRef.current.x,
+        y: selectionStartRef.current.y,
+        width: pointer.x - selectionStartRef.current.x,
+        height: pointer.y - selectionStartRef.current.y
+      });
+      return;
+    }
     if (!paintingRef.current || !cell) return;
     if (wallLineModeRef.current && strokeStartRef.current) {
       getAxisLockedLineCells(strokeStartRef.current, cell).forEach((entry) => paintStrokeCell(entry));
       return;
     }
-    paintStrokeCell(cell);
+    paintStrokeCell(cell, pointer);
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(event: KonvaEventObject<MouseEvent | TouchEvent>) {
+    if (tool === 'select' && selectionStartRef.current && selectionBox) {
+      const isTiny = Math.abs(selectionBox.width) < 4 && Math.abs(selectionBox.height) < 4;
+      if (!isTiny) {
+        selectObjectsInRect(selectionBox, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
+      }
+    }
+    selectionStartRef.current = null;
+    setSelectionBox(null);
     paintingRef.current = false;
     wallLineModeRef.current = false;
     strokeStartRef.current = null;
     strokeCellsRef.current.clear();
   }
 
-  function paintStrokeCell(cell: { x: number; y: number }) {
+  function paintStrokeCell(cell: { x: number; y: number }, pointer?: { x: number; y: number }) {
     const targetLayer = getPaintLayer(tool, map.activeLayer);
     const cells = getBrushCells(cell.x, cell.y, brushSize);
     const newCells = cells.filter((entry) => {
@@ -106,7 +131,10 @@ export function MapStage() {
     });
     if (!newCells.length) return;
     newCells.forEach((entry) => {
-      if (tool === 'erase') eraseBrush(entry.x, entry.y, 1);
+      if (tool === 'erase') {
+        if (pointer && newCells.length === 1) eraseBrushAtPoint(pointer.x, pointer.y, 1);
+        else eraseBrush(entry.x, entry.y, 1);
+      }
       else paintBrush(entry.x, entry.y, targetLayer, selectedAssetId, 1);
     });
   }
@@ -126,7 +154,7 @@ export function MapStage() {
       paintBrush(cell.x, cell.y, asset.defaultLayer, assetId, brushSize);
       return;
     }
-    addObject(assetId, x, y, selectedObjectId);
+    addObject(assetId, x, y, undefined);
   }
 
   return (
@@ -153,14 +181,14 @@ export function MapStage() {
           <MapBackground map={map} />
           {isLayerVisible('floor', soloLayer) ? <TileLayerView layer={map.tileLayers.floor} map={map} /> : null}
           {isLayerVisible('walls', soloLayer) ? <TileLayerView layer={map.tileLayers.walls} map={map} wall /> : null}
-          {isLayerVisible('decoration', soloLayer) ? <ObjectLayerView layer={map.decorationLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
-          {isLayerVisible('objects', soloLayer) ? <ObjectLayerView layer={map.objectLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
-          {isLayerVisible('details', soloLayer) ? <ObjectLayerView layer={map.detailLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
-          {isLayerVisible('lighting', soloLayer) ? <ObjectLayerView layer={map.lightingLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
-          {isLayerVisible('mechanics', soloLayer) ? <ObjectLayerView layer={map.mechanicalLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('decoration', soloLayer) ? <ObjectLayerView layer={map.decorationLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('objects', soloLayer) ? <ObjectLayerView layer={map.objectLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('details', soloLayer) ? <ObjectLayerView layer={map.detailLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('lighting', soloLayer) ? <ObjectLayerView layer={map.lightingLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('mechanics', soloLayer) ? <ObjectLayerView layer={map.mechanicalLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
           {isLayerVisible('collision', soloLayer) ? <TileLayerView layer={map.tileLayers.collision} map={map} collision /> : null}
           {isLayerVisible('fog', soloLayer) ? <FogView map={map} /> : null}
-          {isLayerVisible('notes', soloLayer) ? <ObjectLayerView layer={map.notesLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('notes', soloLayer) ? <ObjectLayerView layer={map.notesLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
           {isLayerVisible('tokens', soloLayer) ? (
             <TokenLayerView
               map={map}
@@ -172,6 +200,7 @@ export function MapStage() {
           {showGrid ? <Grid map={map} /> : null}
           <BrushPreview map={map} tool={tool} cell={hoverCell} brushSize={brushSize} />
           <PlacementPreview map={map} tool={tool} point={hoverPoint} assetId={selectedAssetId} />
+          {selectionBox ? <SelectionBox box={selectionBox} /> : null}
         </Layer>
       </Stage>
     </div>
@@ -218,6 +247,7 @@ function TileLayerView({ layer, map, wall = false, collision = false }: { layer:
 function ObjectLayerView({
   layer,
   map,
+  tool,
   selectedObjectIds,
   onSelect,
   onUpdate,
@@ -226,10 +256,11 @@ function ObjectLayerView({
 }: {
   layer: ObjectLayer;
   map: OmniMap;
+  tool: MapTool;
   selectedObjectIds: string[];
   onSelect(objectId: string, additive?: boolean): void;
   onUpdate(objectId: string, patch: Partial<MapObject>): void;
-  onMoveSelected(deltaX: number, deltaY: number): void;
+  onMoveSelected(deltaX: number, deltaY: number, snapOverride?: SnapMode | null): void;
   setTransforming(value: boolean): void;
 }) {
   if (!layer.visible) return null;
@@ -240,9 +271,10 @@ function ObjectLayerView({
           key={object.id}
           map={map}
           object={object}
+          tool={tool}
           selected={selectedObjectIds.includes(object.id)}
           selectable={layer.selectable !== false}
-          draggable={layer.selectable !== false && layer.editable !== false && !layer.locked && !object.locked && map.mode === 'build'}
+          draggable={tool === 'select' && layer.selectable !== false && layer.editable !== false && !layer.locked && !object.locked && map.mode === 'build'}
           canTransform={selectedObjectIds.length === 1}
           opacity={layer.opacity}
           onSelect={onSelect}
@@ -258,6 +290,7 @@ function ObjectLayerView({
 function MapObjectShape({
   map,
   object,
+  tool,
   selected,
   selectable,
   draggable,
@@ -270,6 +303,7 @@ function MapObjectShape({
 }: {
   map: OmniMap;
   object: MapObject;
+  tool: MapTool;
   selected: boolean;
   selectable: boolean;
   draggable: boolean;
@@ -277,7 +311,7 @@ function MapObjectShape({
   opacity: number;
   onSelect(objectId: string, additive?: boolean): void;
   onUpdate(objectId: string, patch: Partial<MapObject>): void;
-  onMoveSelected(deltaX: number, deltaY: number): void;
+  onMoveSelected(deltaX: number, deltaY: number, snapOverride?: SnapMode | null): void;
   setTransforming(value: boolean): void;
 }) {
   const asset = getAsset(object.assetId, map.tilesets);
@@ -290,15 +324,16 @@ function MapObjectShape({
   const stroke = selected ? '#f5f3ff' : asset?.stroke || '#8b5cf6';
 
   useEffect(() => {
-    if (!selected || !canTransform || !transformerRef.current || !groupRef.current) return;
+    if (tool !== 'select' || !selected || !canTransform || !transformerRef.current || !groupRef.current) return;
     transformerRef.current.nodes([groupRef.current]);
     transformerRef.current.getLayer()?.batchDraw();
-  }, [selected, canTransform]);
+  }, [selected, canTransform, tool]);
 
   return (
     <>
       <Group
         name="map-object"
+        id={object.id}
         ref={groupRef}
         x={object.x}
         y={object.y}
@@ -306,18 +341,24 @@ function MapObjectShape({
         draggable={draggable}
         opacity={opacity * object.opacity}
         onMouseDown={(event) => {
+          if (tool !== 'select') return;
           event.cancelBubble = true;
           if (!selectable) return;
           onSelect(object.id, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
         }}
         onTouchStart={(event) => {
+          if (tool !== 'select') return;
           event.cancelBubble = true;
           if (!selectable) return;
           onSelect(object.id);
         }}
         onDragEnd={(event) => {
           if (selected) {
-            onMoveSelected(event.target.x() - object.x, event.target.y() - object.y);
+            onMoveSelected(
+              event.target.x() - object.x,
+              event.target.y() - object.y,
+              'shiftKey' in event.evt && event.evt.shiftKey ? 'grid' : null
+            );
             event.target.position({ x: object.x, y: object.y });
           } else {
             onUpdate(object.id, { x: event.target.x(), y: event.target.y() });
@@ -361,7 +402,7 @@ function MapObjectShape({
         {object.interactable ? <Circle x={width - 8} y={8} radius={4} fill="#f5f3ff" opacity={0.75} /> : null}
         {selected ? <Rect x={-4} y={-4} width={width + 8} height={height + 8} stroke="#c4b5fd" strokeWidth={1} dash={[4, 4]} listening={false} /> : null}
       </Group>
-      {selected && canTransform && draggable ? (
+      {tool === 'select' && selected && canTransform && draggable ? (
         <Transformer
           ref={transformerRef}
           onMouseDown={(event) => {
@@ -472,6 +513,25 @@ function PlacementPreview({
     return <KonvaImage image={image} x={point.x} y={point.y} width={width} height={height} opacity={0.42} listening={false} />;
   }
   return <Rect x={point.x} y={point.y} width={width} height={height} fill={asset.color || '#8b5cf6'} opacity={0.28} stroke="#f5f3ff" dash={[4, 4]} listening={false} />;
+}
+
+function SelectionBox({ box }: { box: { x: number; y: number; width: number; height: number } }) {
+  const x = Math.min(box.x, box.x + box.width);
+  const y = Math.min(box.y, box.y + box.height);
+  return (
+    <Rect
+      x={x}
+      y={y}
+      width={Math.abs(box.width)}
+      height={Math.abs(box.height)}
+      fill="#8b5cf6"
+      opacity={0.1}
+      stroke="#c4b5fd"
+      strokeWidth={1}
+      dash={[6, 4]}
+      listening={false}
+    />
+  );
 }
 
 function FogView({ map }: { map: OmniMap }) {
@@ -682,8 +742,17 @@ function getAxisLockedLineCells(start: { x: number; y: number }, end: { x: numbe
   return cells;
 }
 
-function isEmptyPlacementTarget(node: Konva.Node) {
+function isEmptySelectionTarget(node: Konva.Node) {
   return !isTransformerTarget(node) && !hasNamedAncestor(node, 'map-object');
+}
+
+function getObjectIdFromTarget(node: Konva.Node) {
+  let current: Konva.Node | null = node;
+  while (current) {
+    if (current.name() === 'map-object') return current.id() || undefined;
+    current = current.getParent();
+  }
+  return undefined;
 }
 
 function isTransformerTarget(node: Konva.Node) {
