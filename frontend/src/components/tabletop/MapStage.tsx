@@ -1,11 +1,11 @@
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
-import type { ReactNode } from 'react';
+import type { DragEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { getAsset } from './assets';
 import { useTabletopStore } from './mapStore';
-import type { MapObject, ObjectLayer, OmniMap, TabletopToken, TileLayer } from './types';
+import type { MapLayerKey, MapObject, MapTool, ObjectLayer, OmniMap, TabletopToken, TileLayer } from './types';
 
 const GRID_LINE = 'rgba(196,181,253,0.13)';
 
@@ -17,40 +17,116 @@ export function MapStage() {
   const selectedObjectId = useTabletopStore((state) => state.selectedObjectId);
   const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
   const selectedTokenId = useTabletopStore((state) => state.selectedTokenId);
-  const paintCell = useTabletopStore((state) => state.paintCell);
-  const eraseAt = useTabletopStore((state) => state.eraseAt);
+  const brushSize = useTabletopStore((state) => state.brushSize);
+  const showGrid = useTabletopStore((state) => state.showGrid);
+  const isTransforming = useTabletopStore((state) => state.isTransforming);
+  const soloLayer = useTabletopStore((state) => state.soloLayer);
+  const paintBrush = useTabletopStore((state) => state.paintBrush);
+  const eraseBrush = useTabletopStore((state) => state.eraseBrush);
   const addObject = useTabletopStore((state) => state.addObject);
   const updateObject = useTabletopStore((state) => state.updateObject);
   const selectObject = useTabletopStore((state) => state.selectObject);
+  const clearObjectSelection = useTabletopStore((state) => state.clearObjectSelection);
   const moveSelectedObjects = useTabletopStore((state) => state.moveSelectedObjects);
   const moveToken = useTabletopStore((state) => state.moveToken);
   const selectToken = useTabletopStore((state) => state.selectToken);
-  const revealFogCell = useTabletopStore((state) => state.revealFogCell);
-  const hideFogCell = useTabletopStore((state) => state.hideFogCell);
+  const captureHistory = useTabletopStore((state) => state.captureHistory);
+  const setTransforming = useTabletopStore((state) => state.setTransforming);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const paintingRef = useRef(false);
+  const wallLineModeRef = useRef(false);
+  const strokeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const strokeCellsRef = useRef(new Set<string>());
+  const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null);
+  const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
 
   const stageWidth = map.width * map.gridSize * zoom;
   const stageHeight = map.height * map.gridSize * zoom;
 
-  function handleStagePointer(event: KonvaEventObject<MouseEvent | TouchEvent>) {
+  function handlePointerDown(event: KonvaEventObject<MouseEvent | TouchEvent>) {
+    if (isTransforming || isTransformerTarget(event.target)) return;
     const pointer = getPointer(event.target.getStage(), zoom);
     if (!pointer) return;
     const cell = pointerToCell(pointer, map);
+    setHoverPoint(pointer);
+    setHoverCell(cell);
 
-    if (map.mode === 'build') {
-      if (tool === 'brush' && cell) paintCell(cell.x, cell.y, 'floor', selectedAssetId);
-      if (tool === 'wall' && cell) paintCell(cell.x, cell.y, 'walls', selectedAssetId);
-      if (tool === 'erase') eraseAt(pointer.x, pointer.y);
-      if (['object', 'door', 'cover', 'terminal', 'light', 'zone', 'note'].includes(tool)) addObject(selectedAssetId, pointer.x, pointer.y, selectedObjectId);
-      if (tool === 'fog' && cell) revealFogCell(cell.x, cell.y);
+    if (map.mode !== 'build') return;
+
+    if (tool === 'select') {
+      clearObjectSelection();
       return;
     }
 
-    if (tool === 'fog' && cell) {
-      const hidden = map.fogLayer.revealedCells.some((entry) => entry.x === cell.x && entry.y === cell.y);
-      if (hidden) hideFogCell(cell.x, cell.y);
-      else revealFogCell(cell.x, cell.y);
+    if (isGridTool(tool) && cell) {
+      captureHistory();
+      paintingRef.current = true;
+      strokeStartRef.current = cell;
+      wallLineModeRef.current = tool === 'wall' && Boolean('shiftKey' in event.evt && event.evt.shiftKey);
+      strokeCellsRef.current = new Set();
+      paintStrokeCell(cell);
+      return;
     }
+
+    if (isPlaceTool(tool) && isEmptyPlacementTarget(event.target)) {
+      addObject(selectedAssetId, pointer.x, pointer.y, selectedObjectId);
+    }
+  }
+
+  function handlePointerMove(event: KonvaEventObject<MouseEvent | TouchEvent>) {
+    if (isTransforming) return;
+    const pointer = getPointer(event.target.getStage(), zoom);
+    if (!pointer) return;
+    const cell = pointerToCell(pointer, map);
+    setHoverPoint(pointer);
+    setHoverCell(cell);
+    if (!paintingRef.current || !cell) return;
+    if (wallLineModeRef.current && strokeStartRef.current) {
+      getAxisLockedLineCells(strokeStartRef.current, cell).forEach((entry) => paintStrokeCell(entry));
+      return;
+    }
+    paintStrokeCell(cell);
+  }
+
+  function handlePointerUp() {
+    paintingRef.current = false;
+    wallLineModeRef.current = false;
+    strokeStartRef.current = null;
+    strokeCellsRef.current.clear();
+  }
+
+  function paintStrokeCell(cell: { x: number; y: number }) {
+    const targetLayer = getPaintLayer(tool, map.activeLayer);
+    const cells = getBrushCells(cell.x, cell.y, brushSize);
+    const newCells = cells.filter((entry) => {
+      const key = `${targetLayer}:${entry.x}:${entry.y}`;
+      if (strokeCellsRef.current.has(key)) return false;
+      strokeCellsRef.current.add(key);
+      return true;
+    });
+    if (!newCells.length) return;
+    newCells.forEach((entry) => {
+      if (tool === 'erase') eraseBrush(entry.x, entry.y, 1);
+      else paintBrush(entry.x, entry.y, targetLayer, selectedAssetId, 1);
+    });
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if (map.mode !== 'build') return;
+    const assetId = event.dataTransfer.getData('application/x-omnivita-asset');
+    if (!assetId || !viewportRef.current) return;
+    const rect = viewportRef.current.getBoundingClientRect();
+    const x = (event.clientX - rect.left + viewportRef.current.scrollLeft) / zoom;
+    const y = (event.clientY - rect.top + viewportRef.current.scrollTop) / zoom;
+    const asset = getAsset(assetId, map.tilesets);
+    const cell = pointerToCell({ x, y }, map);
+    if ((asset?.defaultLayer === 'floor' || asset?.defaultLayer === 'walls') && cell) {
+      captureHistory();
+      paintBrush(cell.x, cell.y, asset.defaultLayer, assetId, brushSize);
+      return;
+    }
+    addObject(assetId, x, y, selectedObjectId);
   }
 
   return (
@@ -60,48 +136,42 @@ export function MapStage() {
       onDragOver={(event) => {
         if (map.mode === 'build') event.preventDefault();
       }}
-      onDrop={(event) => {
-        event.preventDefault();
-        if (map.mode !== 'build') return;
-        const assetId = event.dataTransfer.getData('application/x-omnivita-asset');
-        if (!assetId || !viewportRef.current) return;
-        const rect = viewportRef.current.getBoundingClientRect();
-        const x = (event.clientX - rect.left + viewportRef.current.scrollLeft) / zoom;
-        const y = (event.clientY - rect.top + viewportRef.current.scrollTop) / zoom;
-        const asset = getAsset(assetId, map.tilesets);
-        const cell = pointerToCell({ x, y }, map);
-        if ((asset?.defaultLayer === 'floor' || asset?.defaultLayer === 'walls') && cell) {
-          paintCell(cell.x, cell.y, asset.defaultLayer, assetId);
-          return;
-        }
-        addObject(assetId, x, y, selectedObjectId);
-      }}
+      onDrop={handleDrop}
     >
       <Stage
         width={stageWidth}
         height={stageHeight}
-        onMouseDown={handleStagePointer}
-        onTouchStart={handleStagePointer}
+        onMouseDown={handlePointerDown}
+        onTouchStart={handlePointerDown}
+        onMouseMove={handlePointerMove}
+        onTouchMove={handlePointerMove}
+        onMouseUp={handlePointerUp}
+        onTouchEnd={handlePointerUp}
+        onMouseLeave={handlePointerUp}
       >
         <Layer scaleX={zoom} scaleY={zoom}>
           <MapBackground map={map} />
-          <TileLayerView layer={map.tileLayers.floor} map={map} />
-          <TileLayerView layer={map.tileLayers.walls} map={map} wall />
-          <ObjectLayerView layer={map.decorationLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} />
-          <ObjectLayerView layer={map.objectLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} />
-          <ObjectLayerView layer={map.detailLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} />
-          <ObjectLayerView layer={map.lightingLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} />
-          <ObjectLayerView layer={map.mechanicalLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} />
-          <TileLayerView layer={map.tileLayers.collision} map={map} collision />
-          <FogView map={map} />
-          <ObjectLayerView layer={map.notesLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} />
-          <TokenLayerView
-            map={map}
-            selectedTokenId={selectedTokenId}
-            onSelect={selectToken}
-            onMove={moveToken}
-          />
-          <Grid map={map} />
+          {isLayerVisible('floor', soloLayer) ? <TileLayerView layer={map.tileLayers.floor} map={map} /> : null}
+          {isLayerVisible('walls', soloLayer) ? <TileLayerView layer={map.tileLayers.walls} map={map} wall /> : null}
+          {isLayerVisible('decoration', soloLayer) ? <ObjectLayerView layer={map.decorationLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('objects', soloLayer) ? <ObjectLayerView layer={map.objectLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('details', soloLayer) ? <ObjectLayerView layer={map.detailLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('lighting', soloLayer) ? <ObjectLayerView layer={map.lightingLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('mechanics', soloLayer) ? <ObjectLayerView layer={map.mechanicalLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('collision', soloLayer) ? <TileLayerView layer={map.tileLayers.collision} map={map} collision /> : null}
+          {isLayerVisible('fog', soloLayer) ? <FogView map={map} /> : null}
+          {isLayerVisible('notes', soloLayer) ? <ObjectLayerView layer={map.notesLayer} map={map} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
+          {isLayerVisible('tokens', soloLayer) ? (
+            <TokenLayerView
+              map={map}
+              selectedTokenId={selectedTokenId}
+              onSelect={selectToken}
+              onMove={moveToken}
+            />
+          ) : null}
+          {showGrid ? <Grid map={map} /> : null}
+          <BrushPreview map={map} tool={tool} cell={hoverCell} brushSize={brushSize} />
+          <PlacementPreview map={map} tool={tool} point={hoverPoint} assetId={selectedAssetId} />
         </Layer>
       </Stage>
     </div>
@@ -151,7 +221,8 @@ function ObjectLayerView({
   selectedObjectIds,
   onSelect,
   onUpdate,
-  onMoveSelected
+  onMoveSelected,
+  setTransforming
 }: {
   layer: ObjectLayer;
   map: OmniMap;
@@ -159,6 +230,7 @@ function ObjectLayerView({
   onSelect(objectId: string, additive?: boolean): void;
   onUpdate(objectId: string, patch: Partial<MapObject>): void;
   onMoveSelected(deltaX: number, deltaY: number): void;
+  setTransforming(value: boolean): void;
 }) {
   if (!layer.visible) return null;
   return (
@@ -169,12 +241,14 @@ function ObjectLayerView({
           map={map}
           object={object}
           selected={selectedObjectIds.includes(object.id)}
-          draggable={!layer.locked && !object.locked && map.mode === 'build'}
+          selectable={layer.selectable !== false}
+          draggable={layer.selectable !== false && layer.editable !== false && !layer.locked && !object.locked && map.mode === 'build'}
           canTransform={selectedObjectIds.length === 1}
           opacity={layer.opacity}
           onSelect={onSelect}
           onUpdate={onUpdate}
           onMoveSelected={onMoveSelected}
+          setTransforming={setTransforming}
         />
       ))}
     </>
@@ -185,22 +259,26 @@ function MapObjectShape({
   map,
   object,
   selected,
+  selectable,
   draggable,
   canTransform,
   opacity,
   onSelect,
   onUpdate,
-  onMoveSelected
+  onMoveSelected,
+  setTransforming
 }: {
   map: OmniMap;
   object: MapObject;
   selected: boolean;
+  selectable: boolean;
   draggable: boolean;
   canTransform: boolean;
   opacity: number;
   onSelect(objectId: string, additive?: boolean): void;
   onUpdate(objectId: string, patch: Partial<MapObject>): void;
   onMoveSelected(deltaX: number, deltaY: number): void;
+  setTransforming(value: boolean): void;
 }) {
   const asset = getAsset(object.assetId, map.tilesets);
   const groupRef = useRef<Konva.Group>(null);
@@ -220,6 +298,7 @@ function MapObjectShape({
   return (
     <>
       <Group
+        name="map-object"
         ref={groupRef}
         x={object.x}
         y={object.y}
@@ -228,10 +307,12 @@ function MapObjectShape({
         opacity={opacity * object.opacity}
         onMouseDown={(event) => {
           event.cancelBubble = true;
+          if (!selectable) return;
           onSelect(object.id, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
         }}
         onTouchStart={(event) => {
           event.cancelBubble = true;
+          if (!selectable) return;
           onSelect(object.id);
         }}
         onDragEnd={(event) => {
@@ -257,6 +338,7 @@ function MapObjectShape({
             rotation: node.rotation(),
             scale: 1
           });
+          setTransforming(false);
         }}
       >
         {object.kind === 'light' ? (
@@ -282,6 +364,14 @@ function MapObjectShape({
       {selected && canTransform && draggable ? (
         <Transformer
           ref={transformerRef}
+          onMouseDown={(event) => {
+            event.cancelBubble = true;
+          }}
+          onTouchStart={(event) => {
+            event.cancelBubble = true;
+          }}
+          onTransformStart={() => setTransforming(true)}
+          onTransformEnd={() => setTransforming(false)}
           rotateEnabled
           anchorStroke="#c4b5fd"
           anchorFill="#12091f"
@@ -327,6 +417,61 @@ function TileCellView({
       <Rect x={x} y={y} width={size} height={size} stroke={stroke} strokeWidth={strokeWidth} opacity={opacity * 0.8} listening={false} />
     </>
   );
+}
+
+function BrushPreview({
+  map,
+  tool,
+  cell,
+  brushSize
+}: {
+  map: OmniMap;
+  tool: MapTool;
+  cell: { x: number; y: number } | null;
+  brushSize: number;
+}) {
+  if (!cell || !isGridTool(tool)) return null;
+  const offset = Math.floor(brushSize / 2);
+  const x = (cell.x - offset) * map.gridSize;
+  const y = (cell.y - offset) * map.gridSize;
+  const size = brushSize * map.gridSize;
+  const tone = tool === 'erase' ? '#fb7185' : tool === 'fog' ? '#05030a' : tool === 'collision' ? '#f59e0b' : tool === 'wall' ? '#c4b5fd' : '#8b5cf6';
+  return (
+    <Rect
+      x={x}
+      y={y}
+      width={size}
+      height={size}
+      fill={tone}
+      opacity={0.16}
+      stroke={tone}
+      strokeWidth={2}
+      dash={[6, 4]}
+      listening={false}
+    />
+  );
+}
+
+function PlacementPreview({
+  map,
+  tool,
+  point,
+  assetId
+}: {
+  map: OmniMap;
+  tool: MapTool;
+  point: { x: number; y: number } | null;
+  assetId: string;
+}) {
+  const asset = getAsset(assetId, map.tilesets);
+  const image = useAssetImage(asset?.imageUrl);
+  if (!point || !asset || !isPlaceTool(tool)) return null;
+  const width = asset.defaultWidth || 64;
+  const height = asset.defaultHeight || 64;
+  if (image) {
+    return <KonvaImage image={image} x={point.x} y={point.y} width={width} height={height} opacity={0.42} listening={false} />;
+  }
+  return <Rect x={point.x} y={point.y} width={width} height={height} fill={asset.color || '#8b5cf6'} opacity={0.28} stroke="#f5f3ff" dash={[4, 4]} listening={false} />;
 }
 
 function FogView({ map }: { map: OmniMap }) {
@@ -489,4 +634,72 @@ function pointerToCell(pointer: { x: number; y: number }, map: OmniMap) {
   const y = Math.floor(pointer.y / map.gridSize);
   if (x < 0 || y < 0 || x >= map.width || y >= map.height) return null;
   return { x, y };
+}
+
+function isGridTool(tool: MapTool) {
+  return tool === 'brush' || tool === 'wall' || tool === 'collision' || tool === 'fog' || tool === 'erase';
+}
+
+function isPlaceTool(tool: MapTool) {
+  return tool === 'object' || tool === 'door' || tool === 'cover' || tool === 'terminal' || tool === 'light' || tool === 'zone' || tool === 'note';
+}
+
+function isLayerVisible(layer: MapLayerKey, soloLayer: MapLayerKey | null) {
+  return !soloLayer || soloLayer === layer;
+}
+
+function getPaintLayer(tool: MapTool, activeLayer: MapLayerKey): MapLayerKey {
+  if (tool === 'brush') return 'floor';
+  if (tool === 'wall') return 'walls';
+  if (tool === 'collision') return 'collision';
+  if (tool === 'fog') return 'fog';
+  return activeLayer;
+}
+
+function getBrushCells(x: number, y: number, brushSize: number) {
+  const offset = Math.floor(brushSize / 2);
+  const cells: Array<{ x: number; y: number }> = [];
+  for (let dy = 0; dy < brushSize; dy += 1) {
+    for (let dx = 0; dx < brushSize; dx += 1) {
+      cells.push({ x: x + dx - offset, y: y + dy - offset });
+    }
+  }
+  return cells;
+}
+
+function getAxisLockedLineCells(start: { x: number; y: number }, end: { x: number; y: number }) {
+  const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+  const cells: Array<{ x: number; y: number }> = [];
+  if (horizontal) {
+    const min = Math.min(start.x, end.x);
+    const max = Math.max(start.x, end.x);
+    for (let x = min; x <= max; x += 1) cells.push({ x, y: start.y });
+  } else {
+    const min = Math.min(start.y, end.y);
+    const max = Math.max(start.y, end.y);
+    for (let y = min; y <= max; y += 1) cells.push({ x: start.x, y });
+  }
+  return cells;
+}
+
+function isEmptyPlacementTarget(node: Konva.Node) {
+  return !isTransformerTarget(node) && !hasNamedAncestor(node, 'map-object');
+}
+
+function isTransformerTarget(node: Konva.Node) {
+  let current: Konva.Node | null = node;
+  while (current) {
+    if (current.getClassName() === 'Transformer') return true;
+    current = current.getParent();
+  }
+  return false;
+}
+
+function hasNamedAncestor(node: Konva.Node, name: string) {
+  let current: Konva.Node | null = node;
+  while (current) {
+    if (current.name() === name) return true;
+    current = current.getParent();
+  }
+  return false;
 }

@@ -145,7 +145,7 @@ export interface OmnivitaCodeEvaluationResponse {
 
 export type TabletopMode = 'build' | 'session';
 export type MapLayerKey = 'floor' | 'walls' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
-export type MapTool = 'select' | 'brush' | 'wall' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'token';
+export type MapTool = 'select' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'token';
 export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
 export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
@@ -198,6 +198,9 @@ export interface TileLayer {
   visible: boolean;
   locked: boolean;
   opacity: number;
+  order?: number;
+  selectable?: boolean;
+  editable?: boolean;
   cells: TileCell[];
 }
 
@@ -258,6 +261,9 @@ export interface ObjectLayer {
   visible: boolean;
   locked: boolean;
   opacity: number;
+  order?: number;
+  selectable?: boolean;
+  editable?: boolean;
   objects: MapObject[];
 }
 
@@ -265,7 +271,11 @@ export interface FogLayer {
   id: string;
   name: string;
   visible: boolean;
+  locked?: boolean;
   opacity: number;
+  order?: number;
+  selectable?: boolean;
+  editable?: boolean;
   revealedCells: Array<{ x: number; y: number }>;
 }
 

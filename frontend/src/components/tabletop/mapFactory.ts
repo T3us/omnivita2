@@ -16,6 +16,19 @@ import type {
 const DEFAULT_WIDTH = 28;
 const DEFAULT_HEIGHT = 18;
 const DEFAULT_GRID = 32;
+const LAYER_ORDER: Partial<Record<MapLayerKey, number>> = {
+  floor: 10,
+  walls: 20,
+  decoration: 30,
+  objects: 40,
+  details: 50,
+  lighting: 60,
+  mechanics: 70,
+  collision: 80,
+  fog: 90,
+  notes: 100,
+  tokens: 110
+};
 
 export function createId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -29,6 +42,9 @@ function createTileLayer(key: TileLayerKey, name: string): TileLayer {
     visible: true,
     locked: false,
     opacity: key === 'collision' ? 0.32 : 1,
+    order: LAYER_ORDER[key] || 0,
+    selectable: false,
+    editable: true,
     cells: []
   };
 }
@@ -41,6 +57,9 @@ function createObjectLayer(key: ObjectLayer['key'], name: string): ObjectLayer {
     visible: true,
     locked: false,
     opacity: 1,
+    order: LAYER_ORDER[key] || 0,
+    selectable: true,
+    editable: true,
     objects: []
   };
 }
@@ -50,7 +69,11 @@ function createFogLayer(): FogLayer {
     id: 'fog',
     name: 'Fog',
     visible: true,
+    locked: false,
     opacity: 0.72,
+    order: LAYER_ORDER.fog,
+    selectable: false,
+    editable: true,
     revealedCells: []
   };
 }
@@ -205,6 +228,9 @@ function normalizeTileLayer(layer: Partial<TileLayer> | undefined, fallback: Til
     visible: layer?.visible !== false,
     locked: Boolean(layer?.locked),
     opacity: clampNumber(layer?.opacity, 0, 1, fallback.opacity),
+    order: Number(layer?.order ?? fallback.order ?? 0),
+    selectable: layer?.selectable ?? fallback.selectable ?? false,
+    editable: layer?.editable ?? fallback.editable ?? true,
     cells: Array.isArray(layer?.cells) ? layer.cells.map(normalizeTileCell).filter(Boolean) as TileCell[] : []
   };
 }
@@ -219,6 +245,9 @@ function normalizeObjectLayer(layer: Partial<ObjectLayer> | undefined, fallback:
     visible: layer?.visible !== false,
     locked: Boolean(layer?.locked),
     opacity: clampNumber(layer?.opacity, 0, 1, fallback.opacity),
+    order: Number(layer?.order ?? fallback.order ?? 0),
+    selectable: layer?.selectable ?? fallback.selectable ?? true,
+    editable: layer?.editable ?? fallback.editable ?? true,
     objects: Array.isArray(layer?.objects) ? layer.objects.map(normalizeObject).filter(Boolean) as MapObject[] : []
   };
 }
@@ -255,7 +284,11 @@ function normalizeFogLayer(layer: Partial<FogLayer> | undefined, fallback: FogLa
     id: 'fog',
     name: String(layer?.name || fallback.name),
     visible: layer?.visible !== false,
+    locked: Boolean(layer?.locked),
     opacity: clampNumber(layer?.opacity, 0, 1, fallback.opacity),
+    order: Number(layer?.order ?? fallback.order ?? 0),
+    selectable: layer?.selectable ?? fallback.selectable ?? false,
+    editable: layer?.editable ?? fallback.editable ?? true,
     revealedCells: Array.isArray(layer?.revealedCells)
       ? layer.revealedCells.map((cell) => ({ x: clampInteger(cell.x, 0, 999), y: clampInteger(cell.y, 0, 999) }))
       : []

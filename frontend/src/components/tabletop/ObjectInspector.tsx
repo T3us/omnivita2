@@ -20,6 +20,9 @@ export function ObjectInspector() {
   const bringForward = useTabletopStore((state) => state.bringForward);
   const sendBackward = useTabletopStore((state) => state.sendBackward);
   const moveLayer = useTabletopStore((state) => state.moveLayer);
+  const centerSelectedOnGrid = useTabletopStore((state) => state.centerSelectedOnGrid);
+  const resetSelectedRotation = useTabletopStore((state) => state.resetSelectedRotation);
+  const resetSelectedScale = useTabletopStore((state) => state.resetSelectedScale);
   const placeOnSelectedParent = useTabletopStore((state) => state.placeOnSelectedParent);
   const groupSelectedObjects = useTabletopStore((state) => state.groupSelectedObjects);
   const ungroupSelectedObjects = useTabletopStore((state) => state.ungroupSelectedObjects);
@@ -104,6 +107,9 @@ export function ObjectInspector() {
             <Button type="button" onClick={() => moveLayer(-1)}>Descer camada</Button>
             <Button type="button" onClick={duplicateSelectedObjects}>Duplicar</Button>
             <Button type="button" tone="danger" onClick={() => removeObject(object.id)}>Deletar</Button>
+            <Button type="button" onClick={centerSelectedOnGrid}>Centralizar grid</Button>
+            <Button type="button" onClick={resetSelectedRotation}>Reset rotacao</Button>
+            <Button type="button" onClick={resetSelectedScale}>Reset escala</Button>
           </div>
           {selectedObjectIds.length > 1 ? (
             <div className="grid grid-cols-2 gap-2">

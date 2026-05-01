@@ -35,6 +35,12 @@ interface TabletopStore {
   snapMode: SnapMode;
   favoriteAssetIds: string[];
   recentAssetIds: string[];
+  brushSize: number;
+  showGrid: boolean;
+  isTransforming: boolean;
+  soloLayer: MapLayerKey | null;
+  historyPast: OmniMap[];
+  historyFuture: OmniMap[];
   dirty: boolean;
   setMap(map: Partial<OmniMap>): void;
   newMap(name: string, width: number, height: number, gridSize: number): void;
@@ -47,13 +53,26 @@ interface TabletopStore {
   addCustomAsset(asset: AssetDefinition): void;
   setZoom(zoom: number): void;
   setSnapMode(mode: SnapMode): void;
+  setBrushSize(size: number): void;
+  toggleGrid(): void;
+  setTransforming(value: boolean): void;
+  setSoloLayer(layer: MapLayerKey | null): void;
+  captureHistory(): void;
+  undo(): void;
+  redo(): void;
   clearDirty(): void;
   paintCell(x: number, y: number, layer?: MapLayerKey, assetId?: string): void;
+  paintBrush(x: number, y: number, layer?: MapLayerKey, assetId?: string, size?: number): void;
+  eraseBrush(x: number, y: number, size?: number): void;
   eraseAt(x: number, y: number): void;
   addObject(assetId: string, x: number, y: number, parentId?: string): void;
   updateObject(objectId: string, patch: Partial<MapObject>): void;
   removeObject(objectId: string): void;
+  removeSelectedObjects(): void;
   duplicateSelectedObjects(): void;
+  centerSelectedOnGrid(): void;
+  resetSelectedRotation(): void;
+  resetSelectedScale(): void;
   selectObject(objectId: string, additive?: boolean): void;
   clearObjectSelection(): void;
   moveSelectedObjects(deltaX: number, deltaY: number): void;
@@ -74,6 +93,7 @@ interface TabletopStore {
   setLayerVisibility(layer: MapLayerKey, visible: boolean): void;
   setLayerLocked(layer: MapLayerKey, locked: boolean): void;
   setLayerOpacity(layer: MapLayerKey, opacity: number): void;
+  toggleActiveLayerLock(): void;
   revealFogCell(x: number, y: number): void;
   hideFogCell(x: number, y: number): void;
 }
@@ -91,6 +111,12 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   snapMode: 'grid',
   favoriteAssetIds: readStoredList('omnivita-tabletop-favorite-assets'),
   recentAssetIds: readStoredList('omnivita-tabletop-recent-assets'),
+  brushSize: 1,
+  showGrid: true,
+  isTransforming: false,
+  soloLayer: null,
+  historyPast: [],
+  historyFuture: [],
   dirty: false,
 
   setMap(map) {
@@ -99,6 +125,9 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       selectedObjectId: '',
       selectedObjectIds: [],
       selectedTokenId: '',
+      soloLayer: null,
+      historyPast: [],
+      historyFuture: [],
       dirty: false
     });
   },
@@ -110,6 +139,9 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       selectedObjectId: '',
       selectedObjectIds: [],
       selectedTokenId: '',
+      soloLayer: null,
+      historyPast: [],
+      historyFuture: [],
       dirty: true
     });
   },
@@ -117,12 +149,13 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   setMapMeta(patch) {
     set((state) => ({
       map: normalizeMap({ ...state.map, ...patch }),
+      ...pushHistory(state),
       dirty: true
     }));
   },
 
   setMode(mode) {
-    set((state) => ({ map: { ...state.map, mode }, tool: mode === 'build' ? state.tool : 'token', dirty: true }));
+    set((state) => ({ map: { ...state.map, mode }, tool: mode === 'build' ? state.tool : 'token', ...pushHistory(state), dirty: true }));
   },
 
   setTool(tool) {
@@ -153,6 +186,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     const recentAssetIds = [normalized.id, ...get().recentAssetIds.filter((id) => id !== normalized.id)].slice(0, 12);
     writeStoredList('omnivita-tabletop-recent-assets', recentAssetIds);
     set((state) => {
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const customTilesetIndex = next.tilesets.findIndex((tileset) => tileset.id === 'custom-assets');
       if (customTilesetIndex >= 0) {
@@ -165,6 +199,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         map: next,
         selectedAssetId: normalized.id,
         recentAssetIds,
+        historyPast: history.historyPast,
+        historyFuture: history.historyFuture,
         dirty: true
       };
     });
@@ -176,6 +212,60 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
 
   setSnapMode(mode) {
     set({ snapMode: mode });
+  },
+
+  setBrushSize(size) {
+    const allowed = [1, 2, 3, 5];
+    const closest = allowed.reduce((best, current) => Math.abs(current - size) < Math.abs(best - size) ? current : best, 1);
+    set({ brushSize: closest });
+  },
+
+  toggleGrid() {
+    set((state) => ({ showGrid: !state.showGrid }));
+  },
+
+  setTransforming(value) {
+    set({ isTransforming: value });
+  },
+
+  setSoloLayer(layer) {
+    set({ soloLayer: layer });
+  },
+
+  captureHistory() {
+    set((state) => pushHistory(state));
+  },
+
+  undo() {
+    set((state) => {
+      const previous = state.historyPast[state.historyPast.length - 1];
+      if (!previous) return state;
+      return {
+        map: cloneMap(previous),
+        historyPast: state.historyPast.slice(0, -1),
+        historyFuture: [cloneMap(state.map), ...state.historyFuture].slice(0, 80),
+        selectedObjectId: '',
+        selectedObjectIds: [],
+        selectedTokenId: '',
+        dirty: true
+      };
+    });
+  },
+
+  redo() {
+    set((state) => {
+      const nextHistory = state.historyFuture[0];
+      if (!nextHistory) return state;
+      return {
+        map: cloneMap(nextHistory),
+        historyPast: [...state.historyPast, cloneMap(state.map)].slice(-80),
+        historyFuture: state.historyFuture.slice(1),
+        selectedObjectId: '',
+        selectedObjectIds: [],
+        selectedTokenId: '',
+        dirty: true
+      };
+    });
   },
 
   clearDirty() {
@@ -190,11 +280,70 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       if (!isInsideCell(state.map, x, y)) return state;
       const next = cloneMap(state.map);
       if (targetLayer === 'floor' || targetLayer === 'walls' || targetLayer === 'collision') {
-        if (next.tileLayers[targetLayer].locked) return state;
+        if (next.tileLayers[targetLayer].locked || next.tileLayers[targetLayer].editable === false) return state;
         next.tileLayers[targetLayer].cells = setTileCell(next.tileLayers[targetLayer].cells, x, y, selectedAsset);
         return { map: next, dirty: true };
       }
       return state;
+    });
+  },
+
+  paintBrush(x, y, layer, assetId, size) {
+    const targetLayer = layer || get().map.activeLayer;
+    const selectedAsset = assetId || get().selectedAssetId;
+    const brushSize = size || get().brushSize;
+    if (!selectedAsset) return;
+    set((state) => {
+      const next = cloneMap(state.map);
+      if (targetLayer === 'floor' || targetLayer === 'walls' || targetLayer === 'collision') {
+        const target = next.tileLayers[targetLayer];
+        if (target.locked || target.editable === false) return state;
+        getBrushCells(x, y, brushSize).forEach((cell) => {
+          if (!isInsideCell(next, cell.x, cell.y)) return;
+          target.cells = setTileCell(target.cells, cell.x, cell.y, selectedAsset);
+        });
+        return { map: next, dirty: true };
+      }
+      if (targetLayer === 'fog') {
+        if (next.fogLayer.locked || next.fogLayer.editable === false) return state;
+        const existing = new Set(next.fogLayer.revealedCells.map((cell) => `${cell.x}:${cell.y}`));
+        getBrushCells(x, y, brushSize).forEach((cell) => {
+          if (!isInsideCell(next, cell.x, cell.y)) return;
+          const key = `${cell.x}:${cell.y}`;
+          if (existing.has(key)) return;
+          existing.add(key);
+          next.fogLayer.revealedCells.push({ x: cell.x, y: cell.y });
+        });
+        return { map: next, dirty: true };
+      }
+      return state;
+    });
+  },
+
+  eraseBrush(x, y, size) {
+    const brushSize = size || get().brushSize;
+    set((state) => {
+      const next = cloneMap(state.map);
+      const layer = next.activeLayer;
+      if (layer === 'floor' || layer === 'walls' || layer === 'collision') {
+        const target = next.tileLayers[layer];
+        if (target.locked || target.editable === false) return state;
+        getBrushCells(x, y, brushSize).forEach((cell) => {
+          if (!isInsideCell(next, cell.x, cell.y)) return;
+          target.cells = removeTileCell(target.cells, cell.x, cell.y);
+        });
+      } else if (layer === 'fog') {
+        if (next.fogLayer.locked || next.fogLayer.editable === false) return state;
+        const eraseKeys = new Set(getBrushCells(x, y, brushSize).map((cell) => `${cell.x}:${cell.y}`));
+        next.fogLayer.revealedCells = next.fogLayer.revealedCells.filter((cell) => !eraseKeys.has(`${cell.x}:${cell.y}`));
+      } else {
+        getBrushCells(x, y, brushSize).forEach((cell) => {
+          const centerX = cell.x * next.gridSize + next.gridSize / 2;
+          const centerY = cell.y * next.gridSize + next.gridSize / 2;
+          removeObjectsAt(next, centerX, centerY);
+        });
+      }
+      return { map: next, dirty: true, selectedObjectId: '', selectedObjectIds: [], selectedTokenId: '' };
     });
   },
 
@@ -215,6 +364,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   addObject(assetId, x, y, parentId) {
     set((state) => {
       if (!isInsidePixel(state.map, x, y)) return state;
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const point = snapPoint(next, x, y, state.snapMode, parentId || state.selectedObjectId);
       const layer = next.activeLayer === 'details' || next.activeLayer === 'decoration' || next.activeLayer === 'objects' || next.activeLayer === 'lighting' || next.activeLayer === 'mechanics' || next.activeLayer === 'notes'
@@ -223,14 +373,15 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const object = buildMapObject(assetId, point.x, point.y, layer, getNextZIndex(next), next.tilesets);
       if (state.snapMode === 'object' && parentId) object.parentId = parentId;
       const target = getObjectLayer(next, object.layer);
-      if (!target || target.locked) return state;
+      if (!target || target.locked || target.editable === false) return state;
       target.objects.push(object);
-      return { map: next, selectedObjectId: object.id, selectedObjectIds: [object.id], selectedTokenId: '', dirty: true };
+      return { map: next, selectedObjectId: object.id, selectedObjectIds: [object.id], selectedTokenId: '', historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   updateObject(objectId, patch) {
     set((state) => {
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const object = findObject(next, objectId);
       if (!object) return state;
@@ -253,13 +404,14 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       if (patch.layer && patch.layer !== previousLayer) {
         moveObjectToLayer(next, object.id, patch.layer);
       }
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   duplicateSelectedObjects() {
     set((state) => {
       if (!state.selectedObjectIds.length) return state;
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const selected = state.selectedObjectIds
         .map((id) => findObject(next, id))
@@ -296,6 +448,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         map: next,
         selectedObjectId: nextIds[nextIds.length - 1] || '',
         selectedObjectIds: nextIds,
+        historyPast: history.historyPast,
+        historyFuture: history.historyFuture,
         dirty: true
       };
     });
@@ -303,10 +457,21 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
 
   removeObject(objectId) {
     set((state) => {
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       removeObjectFromMap(next, objectId);
       const selectedObjectIds = state.selectedObjectIds.filter((id) => id !== objectId);
-      return { map: next, selectedObjectId: selectedObjectIds[0] || '', selectedObjectIds, dirty: true };
+      return { map: next, selectedObjectId: selectedObjectIds[0] || '', selectedObjectIds, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+    });
+  },
+
+  removeSelectedObjects() {
+    set((state) => {
+      if (!state.selectedObjectIds.length) return state;
+      const history = pushHistory(state);
+      const next = cloneMap(state.map);
+      state.selectedObjectIds.forEach((id) => removeObjectFromMap(next, id));
+      return { map: next, selectedObjectId: '', selectedObjectIds: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
@@ -331,9 +496,55 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     set({ selectedObjectId: '', selectedObjectIds: [] });
   },
 
+  centerSelectedOnGrid() {
+    set((state) => {
+      if (!state.selectedObjectIds.length) return state;
+      const history = pushHistory(state);
+      const next = cloneMap(state.map);
+      state.selectedObjectIds.forEach((id) => {
+        const object = findObject(next, id);
+        if (!object || object.locked) return;
+        object.x = Math.round(object.x / next.gridSize) * next.gridSize;
+        object.y = Math.round(object.y / next.gridSize) * next.gridSize;
+        if (object.light) {
+          object.light.x = object.x;
+          object.light.y = object.y;
+        }
+      });
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+    });
+  },
+
+  resetSelectedRotation() {
+    set((state) => {
+      if (!state.selectedObjectIds.length) return state;
+      const history = pushHistory(state);
+      const next = cloneMap(state.map);
+      state.selectedObjectIds.forEach((id) => {
+        const object = findObject(next, id);
+        if (object && !object.locked) object.rotation = 0;
+      });
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+    });
+  },
+
+  resetSelectedScale() {
+    set((state) => {
+      if (!state.selectedObjectIds.length) return state;
+      const history = pushHistory(state);
+      const next = cloneMap(state.map);
+      state.selectedObjectIds.forEach((id) => {
+        const object = findObject(next, id);
+        if (object && !object.locked) object.scale = 1;
+      });
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+    });
+  },
+
   moveSelectedObjects(deltaX, deltaY) {
     set((state) => {
       if (!state.selectedObjectIds.length) return state;
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       state.selectedObjectIds.forEach((id) => {
         const object = findObject(next, id);
@@ -346,7 +557,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
           object.light.y = object.y;
         }
       });
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
@@ -361,6 +572,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   moveLayer(direction) {
     set((state) => {
       if (!state.selectedObjectIds.length) return state;
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       state.selectedObjectIds.forEach((id) => {
         const object = findObject(next, id);
@@ -369,13 +581,14 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         const nextLayer = OBJECT_LAYER_ORDER[Math.max(0, Math.min(OBJECT_LAYER_ORDER.length - 1, currentIndex + direction))];
         if (nextLayer) moveObjectToLayer(next, object.id, nextLayer);
       });
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   placeOnSelectedParent() {
     set((state) => {
       if (state.selectedObjectIds.length < 2) return state;
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const parentId = state.selectedObjectIds[0];
       const parent = findObject(next, parentId);
@@ -388,37 +601,40 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         child.y = parent.y + 8 + index * 8;
         child.zIndex = Math.max(parent.zIndex + 1, child.zIndex);
       });
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   groupSelectedObjects() {
     set((state) => {
       if (state.selectedObjectIds.length < 2) return state;
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const groupId = createId('grp');
       state.selectedObjectIds.forEach((id) => {
         const object = findObject(next, id);
         if (object) object.groupId = groupId;
       });
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   ungroupSelectedObjects() {
     set((state) => {
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       state.selectedObjectIds.forEach((id) => {
         const object = findObject(next, id);
         if (object) object.groupId = undefined;
       });
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   saveSelectionAsPrefab(name) {
     set((state) => {
       if (!state.selectedObjectIds.length) return state;
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const objects = state.selectedObjectIds.map((id) => findObject(next, id)).filter(Boolean) as MapObject[];
       if (!objects.length) return state;
@@ -435,7 +651,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         }))
       };
       next.prefabs = [prefab, ...(next.prefabs || [])].slice(0, 40);
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
@@ -443,6 +659,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     set((state) => {
       const prefab = state.map.prefabs?.find((entry) => entry.id === prefabId);
       if (!prefab) return state;
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const nextIds: string[] = [];
       const groupMap = new Map<string, string>();
@@ -467,19 +684,21 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         layer.objects.push(object);
         nextIds.push(object.id);
       });
-      return { map: next, selectedObjectId: nextIds[0] || '', selectedObjectIds: nextIds, dirty: true };
+      return { map: next, selectedObjectId: nextIds[0] || '', selectedObjectIds: nextIds, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   removePrefab(prefabId) {
     set((state) => ({
       map: { ...state.map, prefabs: (state.map.prefabs || []).filter((prefab) => prefab.id !== prefabId) },
+      ...pushHistory(state),
       dirty: true
     }));
   },
 
   addToken(source, x, y) {
     set((state) => {
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const token: TabletopToken = {
         id: createId('tok'),
@@ -495,36 +714,39 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         locked: false
       };
       next.tokens.push(token);
-      return { map: next, selectedTokenId: token.id, selectedObjectId: '', selectedObjectIds: [], dirty: true };
+      return { map: next, selectedTokenId: token.id, selectedObjectId: '', selectedObjectIds: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   moveToken(tokenId, x, y) {
     set((state) => {
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const token = next.tokens.find((entry) => entry.id === tokenId);
       if (!token || token.locked) return state;
       token.x = Math.max(0, Math.min(next.width - 1, Math.round(x)));
       token.y = Math.max(0, Math.min(next.height - 1, Math.round(y)));
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   updateToken(tokenId, patch) {
     set((state) => {
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       const token = next.tokens.find((entry) => entry.id === tokenId);
       if (!token) return state;
       Object.assign(token, patch);
-      return { map: next, dirty: true };
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
   removeToken(tokenId) {
     set((state) => {
+      const history = pushHistory(state);
       const next = cloneMap(state.map);
       next.tokens = next.tokens.filter((entry) => entry.id !== tokenId);
-      return { map: next, selectedTokenId: '', dirty: true };
+      return { map: next, selectedTokenId: '', historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
@@ -533,15 +755,23 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   },
 
   setLayerVisibility(layer, visible) {
-    set((state) => ({ map: patchLayer(state.map, layer, { visible }), dirty: true }));
+    set((state) => ({ map: patchLayer(state.map, layer, { visible }), ...pushHistory(state), dirty: true }));
   },
 
   setLayerLocked(layer, locked) {
-    set((state) => ({ map: patchLayer(state.map, layer, { locked }), dirty: true }));
+    set((state) => ({ map: patchLayer(state.map, layer, { locked }), ...pushHistory(state), dirty: true }));
   },
 
   setLayerOpacity(layer, opacity) {
-    set((state) => ({ map: patchLayer(state.map, layer, { opacity: Math.max(0, Math.min(1, opacity)) }), dirty: true }));
+    set((state) => ({ map: patchLayer(state.map, layer, { opacity: Math.max(0, Math.min(1, opacity)) }), ...pushHistory(state), dirty: true }));
+  },
+
+  toggleActiveLayerLock() {
+    set((state) => {
+      const current = getLayerState(state.map, state.map.activeLayer);
+      if (!('locked' in current)) return state;
+      return { map: patchLayer(state.map, state.map.activeLayer, { locked: !current.locked }), ...pushHistory(state), dirty: true };
+    });
   },
 
   revealFogCell(x, y) {
@@ -578,6 +808,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
 
 function patchSelectedZ(state: TabletopStore, direction: -1 | 1) {
   if (!state.selectedObjectIds.length) return state;
+  const history = pushHistory(state);
   const next = cloneMap(state.map);
   const all = getAllMapObjects(next);
   const selected = state.selectedObjectIds
@@ -591,7 +822,26 @@ function patchSelectedZ(state: TabletopStore, direction: -1 | 1) {
     if (!object) return;
     object.zIndex = direction > 0 ? frontBase + index : backBase + index;
   });
-  return { map: next, dirty: true };
+  return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+}
+
+function pushHistory(state: TabletopStore) {
+  return {
+    historyPast: [...state.historyPast, cloneMap(state.map)].slice(-80),
+    historyFuture: []
+  };
+}
+
+function getBrushCells(x: number, y: number, size: number) {
+  const normalized = Math.max(1, Math.round(size));
+  const offset = Math.floor(normalized / 2);
+  const cells: Array<{ x: number; y: number }> = [];
+  for (let dy = 0; dy < normalized; dy += 1) {
+    for (let dx = 0; dx < normalized; dx += 1) {
+      cells.push({ x: x + dx - offset, y: y + dy - offset });
+    }
+  }
+  return cells;
 }
 
 function isInsideCell(map: OmniMap, x: number, y: number) {
@@ -626,6 +876,18 @@ function patchLayer(map: OmniMap, layer: MapLayerKey, patch: { visible?: boolean
     if (objectLayer) Object.assign(objectLayer, patch);
   }
   return next;
+}
+
+function getLayerState(map: OmniMap, layer: MapLayerKey) {
+  if (layer === 'floor' || layer === 'walls' || layer === 'collision') return map.tileLayers[layer];
+  if (layer === 'objects') return map.objectLayer;
+  if (layer === 'decoration') return map.decorationLayer;
+  if (layer === 'details') return map.detailLayer;
+  if (layer === 'lighting') return map.lightingLayer;
+  if (layer === 'mechanics') return map.mechanicalLayer;
+  if (layer === 'notes') return map.notesLayer;
+  if (layer === 'fog') return map.fogLayer;
+  return { visible: true, locked: false, opacity: 1 };
 }
 
 function findObject(map: OmniMap, objectId: string) {
