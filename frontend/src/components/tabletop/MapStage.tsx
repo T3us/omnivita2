@@ -9,6 +9,11 @@ import type { MapLayerKey, MapObject, MapTool, ObjectLayer, OmniMap, SelectedTil
 
 const GRID_LINE = 'rgba(196,181,253,0.13)';
 
+type PointerContext = {
+  pointer: { x: number; y: number };
+  cell: { x: number; y: number } | null;
+};
+
 export function MapStage() {
   const map = useTabletopStore((state) => state.map);
   const tool = useTabletopStore((state) => state.tool);
@@ -18,6 +23,7 @@ export function MapStage() {
   const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
   const selectedTokenId = useTabletopStore((state) => state.selectedTokenId);
   const placementRotation = useTabletopStore((state) => state.placementRotation);
+  const snapMode = useTabletopStore((state) => state.snapMode);
   const brushSize = useTabletopStore((state) => state.brushSize);
   const showGrid = useTabletopStore((state) => state.showGrid);
   const isTransforming = useTabletopStore((state) => state.isTransforming);
@@ -59,34 +65,47 @@ export function MapStage() {
 
     if (map.mode !== 'build') return;
 
-    if (tool === 'select') {
-      if (isEmptySelectionTarget(event.target)) {
-        if (!('shiftKey' in event.evt && event.evt.shiftKey)) clearObjectSelection();
-        selectionStartRef.current = pointer;
-        setSelectionBox({ x: pointer.x, y: pointer.y, width: 0, height: 0 });
-      }
+    const context = { pointer, cell };
+    if (tool === 'select') handleSelectPointerDown(event, context);
+    else if (tool === 'erase') handleErasePointerDown(context);
+    else if (tool === 'door' || isPlaceTool(tool)) handlePlacePointerDown(event, context);
+    else if (isGridTool(tool)) handlePaintPointerDown(event, context);
+  }
+
+  function handleSelectPointerDown(event: KonvaEventObject<MouseEvent | TouchEvent>, context: PointerContext) {
+    if (!isEmptySelectionTarget(event.target)) return;
+    if (!('shiftKey' in event.evt && event.evt.shiftKey)) clearObjectSelection();
+    selectionStartRef.current = context.pointer;
+    setSelectionBox({ x: context.pointer.x, y: context.pointer.y, width: 0, height: 0 });
+  }
+
+  function handlePaintPointerDown(event: KonvaEventObject<MouseEvent | TouchEvent>, context: PointerContext) {
+    if (!context.cell) return;
+    captureHistory();
+    paintingRef.current = true;
+    strokeStartRef.current = context.cell;
+    wallLineModeRef.current = tool === 'wall' && Boolean('shiftKey' in event.evt && event.evt.shiftKey);
+    strokeCellsRef.current = new Set();
+    paintStrokeCell(context.cell, context.pointer);
+  }
+
+  function handleErasePointerDown(context: PointerContext) {
+    if (!context.cell) return;
+    captureHistory();
+    paintingRef.current = true;
+    strokeStartRef.current = context.cell;
+    wallLineModeRef.current = false;
+    strokeCellsRef.current = new Set();
+    paintStrokeCell(context.cell, context.pointer);
+  }
+
+  function handlePlacePointerDown(event: KonvaEventObject<MouseEvent | TouchEvent>, context: PointerContext) {
+    if (tool === 'door') {
+      if (context.cell) addDoor(context.cell.x, context.cell.y, selectedAssetId, placementRotation);
       return;
     }
-
-    if (tool === 'door' && cell) {
-      addDoor(cell.x, cell.y, selectedAssetId, placementRotation);
-      return;
-    }
-
-    if (isGridTool(tool) && cell) {
-      captureHistory();
-      paintingRef.current = true;
-      strokeStartRef.current = cell;
-      wallLineModeRef.current = tool === 'wall' && Boolean('shiftKey' in event.evt && event.evt.shiftKey);
-      strokeCellsRef.current = new Set();
-      paintStrokeCell(cell, pointer);
-      return;
-    }
-
-    if (isPlaceTool(tool)) {
-      const parentId = 'altKey' in event.evt && event.evt.altKey ? getObjectIdFromTarget(event.target) : undefined;
-      addObject(selectedAssetId, pointer.x, pointer.y, parentId);
-    }
+    const parentId = 'altKey' in event.evt && event.evt.altKey ? getObjectIdFromTarget(event.target) : undefined;
+    addObject(selectedAssetId, context.pointer.x, context.pointer.y, parentId);
   }
 
   function handlePointerMove(event: KonvaEventObject<MouseEvent | TouchEvent>) {
@@ -214,7 +233,7 @@ export function MapStage() {
           <SelectedTileOverlay map={map} selectedTileCells={selectedTileCells} />
           <SelectedGroupBounds map={map} selectedObjectIds={selectedObjectIds} selectedTileCells={selectedTileCells} />
           <BrushPreview map={map} tool={tool} cell={hoverCell} brushSize={brushSize} />
-          <PlacementPreview map={map} tool={tool} point={hoverPoint} cell={hoverCell} assetId={selectedAssetId} rotation={placementRotation} />
+          <PlacementPreview map={map} tool={tool} point={hoverPoint} cell={hoverCell} assetId={selectedAssetId} rotation={placementRotation} snapMode={snapMode} />
           {selectionBox ? <SelectionBox box={selectionBox} /> : null}
         </Layer>
       </Stage>
@@ -505,7 +524,7 @@ function BrushPreview({
   cell: { x: number; y: number } | null;
   brushSize: number;
 }) {
-  if (!cell || !isGridTool(tool)) return null;
+  if (!cell || (!isGridTool(tool) && tool !== 'erase')) return null;
   const offset = Math.floor(brushSize / 2);
   const x = (cell.x - offset) * map.gridSize;
   const y = (cell.y - offset) * map.gridSize;
@@ -533,7 +552,8 @@ function PlacementPreview({
   point,
   cell,
   assetId,
-  rotation
+  rotation,
+  snapMode
 }: {
   map: OmniMap;
   tool: MapTool;
@@ -541,6 +561,7 @@ function PlacementPreview({
   cell: { x: number; y: number } | null;
   assetId: string;
   rotation: number;
+  snapMode: SnapMode;
 }) {
   const selectedAsset = getAsset(assetId, map.tilesets);
   const asset = tool === 'door' && selectedAsset?.kind !== 'door' && selectedAsset?.defaultLayer !== 'doors'
@@ -548,6 +569,8 @@ function PlacementPreview({
     : selectedAsset;
   const image = useAssetImage(asset?.imageUrl);
   if (!point || !asset || (!isPlaceTool(tool) && tool !== 'door')) return null;
+  const targetLayer = tool === 'door' ? 'doors' : getPlacementTargetLayer(map, asset.defaultLayer);
+  const editable = isPlacementLayerEditable(map, targetLayer);
   if (tool === 'door') {
     if (!cell) return null;
     const footprint = resolveFootprint(asset.gridFootprint || { w: 1, h: 1 }, rotation);
@@ -557,9 +580,9 @@ function PlacementPreview({
         y={cell.y * map.gridSize}
         width={footprint.w * map.gridSize}
         height={footprint.h * map.gridSize}
-        fill={asset.color || '#8b5cf6'}
+        fill={editable ? asset.color || '#8b5cf6' : '#fb7185'}
         opacity={0.22}
-        stroke="#f5f3ff"
+        stroke={editable ? '#f5f3ff' : '#fb7185'}
         strokeWidth={2}
         dash={[5, 4]}
         listening={false}
@@ -568,10 +591,18 @@ function PlacementPreview({
   }
   const width = asset.defaultWidth || 64;
   const height = asset.defaultHeight || 64;
+  const previewPoint = resolvePreviewPoint(map, point, snapMode);
+  const stroke = editable ? '#f5f3ff' : '#fb7185';
+  const opacity = editable ? 0.48 : 0.32;
   if (image) {
-    return <KonvaImage image={image} x={point.x} y={point.y} width={width} height={height} rotation={normalizeRotation45(rotation)} opacity={0.42} listening={false} />;
+    return (
+      <Group x={previewPoint.x} y={previewPoint.y} rotation={normalizeRotation45(rotation)} opacity={opacity} listening={false}>
+        <KonvaImage image={image} width={width} height={height} />
+        <Rect width={width} height={height} stroke={stroke} strokeWidth={2} dash={[4, 4]} />
+      </Group>
+    );
   }
-  return <Rect x={point.x} y={point.y} width={width} height={height} rotation={normalizeRotation45(rotation)} fill={asset.color || '#8b5cf6'} opacity={0.28} stroke="#f5f3ff" dash={[4, 4]} listening={false} />;
+  return <Rect x={previewPoint.x} y={previewPoint.y} width={width} height={height} rotation={normalizeRotation45(rotation)} fill={editable ? asset.color || '#8b5cf6' : '#fb7185'} opacity={0.28} stroke={stroke} dash={[4, 4]} listening={false} />;
 }
 
 function SelectionBox({ box }: { box: { x: number; y: number; width: number; height: number } }) {
@@ -708,12 +739,14 @@ function TokenShape({
   const size = map.gridSize;
   const tone = token.kind === 'enemy' ? '#fb7185' : token.kind === 'character' ? '#34d399' : '#8b5cf6';
   const draggable = map.mode === 'session' && !token.locked;
+  const visualSize = size * Math.max(0.5, token.size || 1);
 
   return (
     <Group
       x={token.x * size}
       y={token.y * size}
       draggable={draggable}
+      opacity={token.hidden ? 0.45 : 1}
       onMouseDown={(event) => {
         event.cancelBubble = true;
         onSelect(token.id);
@@ -725,29 +758,29 @@ function TokenShape({
       onDragEnd={(event) => onMove(token.id, event.target.x() / size, event.target.y() / size)}
     >
       <Circle
-        x={size / 2}
-        y={size / 2}
-        radius={size * 0.42}
+        x={visualSize / 2}
+        y={visualSize / 2}
+        radius={visualSize * 0.42}
         fill="#16101f"
-        stroke={selected ? '#f5f3ff' : tone}
+        stroke={selected ? '#f5f3ff' : token.auraColor || tone}
         strokeWidth={selected ? 3 : 2}
       />
       <Text
         x={0}
-        y={size / 2 - 8}
-        width={size}
+        y={visualSize / 2 - 8}
+        width={visualSize}
         align="center"
         text={token.name.slice(0, 1).toUpperCase()}
         fill="#f5f3ff"
         fontStyle="bold"
-        fontSize={Math.max(12, size * 0.42)}
+        fontSize={Math.max(12, visualSize * 0.42)}
       />
       <Text
-        x={-size * 0.5}
-        y={size + 2}
-        width={size * 2}
+        x={-visualSize * 0.5}
+        y={visualSize + 2}
+        width={visualSize * 2}
         align="center"
-        text={token.name}
+        text={token.status ? `${token.name} - ${token.status}` : token.name}
         fill="#ddd6fe"
         fontSize={10}
       />
@@ -804,7 +837,7 @@ function pointerToCell(pointer: { x: number; y: number }, map: OmniMap) {
 }
 
 function isGridTool(tool: MapTool) {
-  return tool === 'brush' || tool === 'wall' || tool === 'collision' || tool === 'fog' || tool === 'erase';
+  return tool === 'brush' || tool === 'wall' || tool === 'collision' || tool === 'fog';
 }
 
 function isPlaceTool(tool: MapTool) {
@@ -821,6 +854,48 @@ function getPaintLayer(tool: MapTool, activeLayer: MapLayerKey): MapLayerKey {
   if (tool === 'collision') return 'collision';
   if (tool === 'fog') return 'fog';
   return activeLayer;
+}
+
+function resolvePreviewPoint(map: OmniMap, point: { x: number; y: number }, snapMode: SnapMode) {
+  if (snapMode === 'grid') {
+    return {
+      x: Math.round(point.x / map.gridSize) * map.gridSize,
+      y: Math.round(point.y / map.gridSize) * map.gridSize
+    };
+  }
+  if (snapMode === 'fine') {
+    return {
+      x: Math.round(point.x / 4) * 4,
+      y: Math.round(point.y / 4) * 4
+    };
+  }
+  return point;
+}
+
+function isPlacementLayerEditable(map: OmniMap, layer: MapLayerKey) {
+  if (layer === 'floor' || layer === 'walls' || layer === 'doors' || layer === 'collision') {
+    const target = map.tileLayers[layer];
+    return target.visible && !target.locked && target.editable !== false;
+  }
+  if (layer === 'fog') return map.fogLayer.visible && !map.fogLayer.locked && map.fogLayer.editable !== false;
+  const objectLayer = getObjectLayerState(map, layer);
+  return Boolean(objectLayer?.visible && !objectLayer.locked && objectLayer.editable !== false);
+}
+
+function getObjectLayerState(map: OmniMap, layer: MapLayerKey): ObjectLayer | null {
+  if (layer === 'objects') return map.objectLayer;
+  if (layer === 'decoration') return map.decorationLayer;
+  if (layer === 'details') return map.detailLayer;
+  if (layer === 'lighting') return map.lightingLayer;
+  if (layer === 'mechanics') return map.mechanicalLayer;
+  if (layer === 'notes') return map.notesLayer;
+  return null;
+}
+
+function getPlacementTargetLayer(map: OmniMap, assetLayer: MapLayerKey): MapLayerKey {
+  const objectLayers: MapLayerKey[] = ['decoration', 'objects', 'details', 'lighting', 'mechanics', 'notes'];
+  if (objectLayers.includes(map.activeLayer)) return map.activeLayer;
+  return assetLayer;
 }
 
 function getBrushCells(x: number, y: number, brushSize: number) {

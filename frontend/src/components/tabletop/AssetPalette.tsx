@@ -7,6 +7,7 @@ import type { Asset, AssetTheme, AssetTypeCategory, MapLayerKey, MapTool, SnapMo
 const layerOptions: Array<{ id: MapLayerKey; label: string }> = [
   { id: 'floor', label: 'Piso' },
   { id: 'walls', label: 'Paredes' },
+  { id: 'doors', label: 'Portas' },
   { id: 'objects', label: 'Objetos' },
   { id: 'decoration', label: 'Decoracao' },
   { id: 'details', label: 'Detalhes' },
@@ -389,6 +390,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 function inferKind(layer: MapLayerKey): Asset['kind'] {
   if (layer === 'floor') return 'floor';
   if (layer === 'walls') return 'wall';
+  if (layer === 'doors') return 'door';
   if (layer === 'details') return 'decal';
   if (layer === 'lighting') return 'light';
   if (layer === 'notes') return 'note';
@@ -400,10 +402,10 @@ function inferKind(layer: MapLayerKey): Asset['kind'] {
 function getToolForAsset(asset: Asset): MapTool {
   if (asset.typeCategory === 'floor' || asset.defaultLayer === 'floor') return 'brush';
   if (asset.typeCategory === 'wall' || asset.defaultLayer === 'walls') return 'wall';
+  if (asset.typeCategory === 'door' || asset.kind === 'door' || asset.defaultLayer === 'doors') return 'door';
   if (asset.typeCategory === 'light' || asset.defaultLayer === 'lighting') return 'light';
   if (asset.typeCategory === 'note' || asset.defaultLayer === 'notes') return 'note';
   if (asset.typeCategory === 'fog' || asset.defaultLayer === 'fog') return 'fog';
-  if (asset.kind === 'door') return 'door';
   if (asset.kind === 'cover') return 'cover';
   if (asset.kind === 'terminal') return 'terminal';
   if (asset.kind === 'zone') return 'zone';

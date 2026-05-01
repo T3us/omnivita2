@@ -144,10 +144,10 @@ export function cloneMap(map: OmniMap): OmniMap {
   return normalizeMap(JSON.parse(JSON.stringify(map)) as OmniMap);
 }
 
-export function setTileCell(cells: TileCell[], x: number, y: number, assetId: string, rotation = 0, footprint?: TileCell['footprint']) {
+export function setTileCell(cells: TileCell[], x: number, y: number, assetId: string, rotation = 0, footprint?: TileCell['footprint'], meta: Partial<TileCell> = {}) {
   const key = `${x}:${y}`;
   const next = cells.filter((cell) => `${cell.x}:${cell.y}` !== key);
-  if (assetId) next.push({ x, y, assetId, rotation: normalizeRotation(rotation), footprint });
+  if (assetId) next.push({ ...meta, x, y, assetId, rotation: normalizeRotation(rotation), footprint });
   return next;
 }
 
@@ -180,7 +180,7 @@ export function buildMapObject(assetId: string, x: number, y: number, layer?: Ma
     height: asset?.defaultHeight || (isLight ? 96 : 64),
     rotation: 0,
     scale: 1,
-    zIndex,
+    zIndex: zIndex || asset?.zIndexDefault || 0,
     snapMode: asset?.defaultSnapMode || 'free',
     opacity: asset?.defaultOpacity ?? 1,
     visibleToPlayers: kind !== 'note',
@@ -188,8 +188,13 @@ export function buildMapObject(assetId: string, x: number, y: number, layer?: Ma
     locked: false,
     blocksMovement: Boolean(asset?.defaultBlocksMovement ?? asset?.blocksMovement),
     blocksVision: Boolean(asset?.defaultBlocksVision ?? asset?.blocksVision),
+    blocksSound: false,
     givesCover: Boolean(asset?.defaultGivesCover ?? asset?.givesCover),
+    coverLevel: asset?.defaultGivesCover || asset?.givesCover ? 'low' : undefined,
     interactable: Boolean((asset?.defaultInteractable ?? asset?.interactable) || kind === 'door' || kind === 'terminal'),
+    difficulty: '',
+    tokenState: '',
+    zoneEffect: kind === 'zone' ? 'Zona especial' : '',
     color: asset?.color,
     note: '',
     light: isLight
@@ -306,7 +311,14 @@ function normalizeTileCell(cell: Partial<TileCell>) {
     y: clampInteger(cell.y, 0, 999),
     assetId: String(cell.assetId),
     rotation: normalizeRotation(Number(cell.rotation || 0)),
-    footprint: cell.footprint ? { w: clampInteger(cell.footprint.w, 1, 10), h: clampInteger(cell.footprint.h, 1, 10) } : undefined
+    footprint: cell.footprint ? { w: clampInteger(cell.footprint.w, 1, 10), h: clampInteger(cell.footprint.h, 1, 10) } : undefined,
+    doorState: cell.doorState === 'open' || cell.doorState === 'locked' ? cell.doorState : cell.doorState === 'closed' ? 'closed' : undefined,
+    blocksMovement: cell.blocksMovement === undefined ? undefined : Boolean(cell.blocksMovement),
+    blocksVision: cell.blocksVision === undefined ? undefined : Boolean(cell.blocksVision),
+    blocksSound: cell.blocksSound === undefined ? undefined : Boolean(cell.blocksSound),
+    interactable: cell.interactable === undefined ? undefined : Boolean(cell.interactable),
+    secret: cell.secret === undefined ? undefined : Boolean(cell.secret),
+    note: cell.note ? String(cell.note) : undefined
   };
 }
 
@@ -341,10 +353,15 @@ function normalizeObject(object: Partial<MapObject>) {
     locked: Boolean(object.locked),
     blocksMovement: Boolean(object.blocksMovement),
     blocksVision: Boolean(object.blocksVision),
+    blocksSound: Boolean(object.blocksSound),
     givesCover: Boolean(object.givesCover),
+    coverLevel: object.coverLevel === 'high' ? 'high' : object.coverLevel === 'low' ? 'low' : undefined,
     interactable: Boolean(object.interactable),
     color: object.color ? String(object.color) : undefined,
     note: object.note ? String(object.note) : '',
+    difficulty: object.difficulty ? String(object.difficulty) : undefined,
+    tokenState: object.tokenState ? String(object.tokenState) : undefined,
+    zoneEffect: object.zoneEffect ? String(object.zoneEffect) : undefined,
     light: object.light
   };
 }
@@ -381,6 +398,11 @@ function normalizeToken(token: Partial<TabletopToken>) {
     y: Number(token.y || 0),
     hpCurrent: token.hpCurrent === undefined ? undefined : Number(token.hpCurrent || 0),
     hpMax: token.hpMax === undefined ? undefined : Number(token.hpMax || 0),
+    status: token.status ? String(token.status) : undefined,
+    size: token.size === undefined ? undefined : Number(token.size || 1),
+    auraColor: token.auraColor ? String(token.auraColor) : undefined,
+    instability: token.instability === undefined ? undefined : Number(token.instability || 0),
+    hidden: Boolean(token.hidden),
     visibleToPlayers: token.visibleToPlayers !== false,
     locked: Boolean(token.locked)
   };

@@ -21,6 +21,7 @@ type AssetInput = {
   givesCover?: boolean;
   interactable?: boolean;
   opacity?: number;
+  zIndexDefault?: number;
   color?: string;
   stroke?: string;
 };
@@ -73,6 +74,7 @@ function asset(input: AssetInput): Asset {
     defaultSnapMode: input.snapMode || inferSnapFromType(input.typeCategory),
     gridFootprint: input.gridFootprint,
     orientations: input.orientations,
+    zIndexDefault: input.zIndexDefault,
     defaultOpacity: input.opacity,
     kind: input.kind,
     color: input.color,
@@ -96,15 +98,16 @@ export const DEFAULT_ASSETS: Asset[] = [
   asset({ id: 'wall-institute', name: 'Parede instituto', typeCategory: 'wall', theme: 'instituto', image: 'wall-institute.png', layer: 'walls', width: 64, height: 64, kind: 'wall', tags: ['parede', 'interior'], blocksMovement: true, blocksVision: true, color: '#252334', stroke: '#8b8daa' }),
   asset({ id: 'wall-canal', name: 'Parede do canal', typeCategory: 'wall', theme: 'laboratorio-canal', image: 'wall-canal.png', layer: 'walls', width: 64, height: 64, kind: 'wall', tags: ['parede', 'canal'], blocksMovement: true, blocksVision: true, color: '#1b2430', stroke: '#38bdf8' }),
 
-  asset({ id: 'table-metal', name: 'Mesa metalica', typeCategory: 'furniture', theme: 'instituto', image: 'table-metal.png', layer: 'objects', width: 128, height: 80, kind: 'prop', tags: ['movel', 'mesa'], snapMode: 'free', blocksMovement: true, givesCover: true, color: '#3a3347', stroke: '#c4b5fd' }),
-  asset({ id: 'bench-lab', name: 'Bancada', typeCategory: 'furniture', theme: 'laboratorio-canal', image: 'bench-lab.png', layer: 'objects', width: 144, height: 64, kind: 'prop', tags: ['movel', 'bancada'], snapMode: 'free', blocksMovement: true, givesCover: true, color: '#293241', stroke: '#67e8f9' }),
-  asset({ id: 'crate-urban', name: 'Caixa', typeCategory: 'prop', theme: 'urbano', image: 'crate-urban.png', layer: 'objects', width: 72, height: 72, kind: 'prop', tags: ['prop', 'cobertura'], snapMode: 'free', blocksMovement: true, givesCover: true, color: '#76523a', stroke: '#d3a36f' }),
-  asset({ id: 'chair-dark', name: 'Cadeira', typeCategory: 'furniture', theme: 'generico', image: 'chair-dark.png', layer: 'objects', width: 48, height: 48, kind: 'prop', tags: ['movel', 'cadeira'], snapMode: 'free', blocksMovement: true, color: '#393041', stroke: '#a78bfa' }),
-  asset({ id: 'terminal-purple', name: 'Terminal', typeCategory: 'mechanic', theme: 'instituto', image: 'terminal-purple.png', layer: 'mechanics', width: 72, height: 64, kind: 'terminal', tags: ['tecnologia', 'interacao'], snapMode: 'free', blocksMovement: true, interactable: true, color: '#27124a', stroke: '#a855f7' }),
+  asset({ id: 'table-metal', name: 'Mesa metalica', typeCategory: 'furniture', theme: 'instituto', image: 'table-metal.png', layer: 'objects', width: 128, height: 80, kind: 'prop', tags: ['movel', 'mesa'], snapMode: 'fine', blocksMovement: true, givesCover: true, color: '#3a3347', stroke: '#c4b5fd' }),
+  asset({ id: 'bench-lab', name: 'Bancada', typeCategory: 'furniture', theme: 'laboratorio-canal', image: 'bench-lab.png', layer: 'objects', width: 144, height: 64, kind: 'prop', tags: ['movel', 'bancada'], snapMode: 'fine', blocksMovement: true, givesCover: true, color: '#293241', stroke: '#67e8f9' }),
+  asset({ id: 'crate-urban', name: 'Caixa', typeCategory: 'prop', theme: 'urbano', image: 'crate-urban.png', layer: 'objects', width: 72, height: 72, kind: 'prop', tags: ['prop', 'cobertura'], snapMode: 'fine', blocksMovement: true, givesCover: true, color: '#76523a', stroke: '#d3a36f' }),
+  asset({ id: 'chair-dark', name: 'Cadeira', typeCategory: 'furniture', theme: 'generico', image: 'chair-dark.png', layer: 'objects', width: 48, height: 48, kind: 'prop', tags: ['movel', 'cadeira'], snapMode: 'fine', blocksMovement: true, color: '#393041', stroke: '#a78bfa' }),
+  asset({ id: 'terminal-purple', name: 'Terminal', typeCategory: 'mechanic', theme: 'instituto', image: 'terminal-purple.png', layer: 'mechanics', width: 72, height: 64, kind: 'terminal', tags: ['tecnologia', 'interacao'], snapMode: 'fine', blocksMovement: true, interactable: true, color: '#27124a', stroke: '#a855f7' }),
   asset({ id: 'door-metal', name: 'Porta metalica 2x1', typeCategory: 'door', theme: 'urbano', image: 'door-metal.png', layer: 'doors', width: 64, height: 32, kind: 'door', tags: ['porta', 'metal', 'entrada'], snapMode: 'grid', gridFootprint: { w: 2, h: 1 }, orientations: [0, 90, 180, 270], blocksMovement: true, blocksVision: true, interactable: true, color: '#262330', stroke: '#ddd6fe' }),
   asset({ id: 'door-metal-single', name: 'Porta metalica 1x1', typeCategory: 'door', theme: 'instituto', image: 'door-metal.png', layer: 'doors', width: 32, height: 32, kind: 'door', tags: ['porta', 'metal', 'pequena'], snapMode: 'grid', gridFootprint: { w: 1, h: 1 }, orientations: [0, 90, 180, 270], blocksMovement: true, blocksVision: true, interactable: true, color: '#262330', stroke: '#ddd6fe' }),
+  asset({ id: 'door-baixo-scrap', name: 'Porta improvisada 1x1', typeCategory: 'door', theme: 'cidade-baixo', image: 'door-metal.png', layer: 'doors', width: 32, height: 32, kind: 'door', tags: ['porta', 'sucata', 'beco'], snapMode: 'grid', gridFootprint: { w: 1, h: 1 }, orientations: [0, 90, 180, 270], blocksMovement: true, blocksVision: true, interactable: true, color: '#3b2636', stroke: '#f59e0b' }),
   asset({ id: 'cover-low', name: 'Cobertura baixa', typeCategory: 'mechanic', theme: 'urbano', image: 'crate-urban.png', layer: 'mechanics', width: 96, height: 40, kind: 'cover', tags: ['combate', 'cobertura'], snapMode: 'free', blocksMovement: true, givesCover: true, color: '#4a3c56', stroke: '#f59e0b' }),
-  asset({ id: 'tube-canal', name: 'Tubo do canal', typeCategory: 'prop', theme: 'laboratorio-canal', image: 'tube-canal.png', layer: 'objects', width: 96, height: 40, kind: 'prop', tags: ['tubo', 'maquina', 'canal'], snapMode: 'free', blocksMovement: true, blocksVision: false, givesCover: true, color: '#0f172a', stroke: '#67e8f9' }),
+  asset({ id: 'tube-canal', name: 'Tubo do canal', typeCategory: 'prop', theme: 'laboratorio-canal', image: 'tube-canal.png', layer: 'objects', width: 96, height: 40, kind: 'prop', tags: ['tubo', 'maquina', 'canal'], snapMode: 'fine', blocksMovement: true, blocksVision: false, givesCover: true, color: '#0f172a', stroke: '#67e8f9' }),
 
   asset({ id: 'paper-scattered', name: 'Papeis soltos', typeCategory: 'detail', theme: 'generico', image: 'paper-scattered.png', layer: 'details', width: 48, height: 36, kind: 'decal', tags: ['papel', 'detalhe', 'mesa'], snapMode: 'free' }),
   asset({ id: 'book-open', name: 'Livro aberto', typeCategory: 'detail', theme: 'generico', image: 'book-open.png', layer: 'details', width: 48, height: 40, kind: 'decal', tags: ['livro', 'mesa', 'detalhe'], snapMode: 'free' }),
@@ -175,6 +178,7 @@ export function normalizeAsset(input: Partial<Asset> | null | undefined): Asset 
     defaultSnapMode: normalizeSnapMode(input.defaultSnapMode) || inferSnapFromType(typeCategory),
     gridFootprint: input.gridFootprint,
     orientations: input.orientations,
+    zIndexDefault: input.zIndexDefault,
     defaultOpacity: input.defaultOpacity,
     kind,
     color: input.color,

@@ -1,7 +1,7 @@
 import { Button } from '../Ui';
 import { getAllAssets, getAsset } from './assets';
 import { useTabletopStore } from './mapStore';
-import type { MapLayerKey, MapObject, TabletopToken } from './types';
+import type { DoorState, MapLayerKey, MapObject, TabletopToken, TileCell, TileLayerKey } from './types';
 
 const objectLayers: Array<{ id: MapLayerKey; label: string }> = [
   { id: 'decoration', label: 'Decoracao' },
@@ -29,6 +29,7 @@ export function ObjectInspector() {
   const ungroupSelectedObjects = useTabletopStore((state) => state.ungroupSelectedObjects);
   const saveSelectionAsPrefab = useTabletopStore((state) => state.saveSelectionAsPrefab);
   const updateSelectedObjects = useTabletopStore((state) => state.updateSelectedObjects);
+  const updateSelectedTiles = useTabletopStore((state) => state.updateSelectedTiles);
   const removeSelectedObjects = useTabletopStore((state) => state.removeSelectedObjects);
   const rotateSelectedObjects = useTabletopStore((state) => state.rotateSelectedObjects);
   const alignSelectedObjects = useTabletopStore((state) => state.alignSelectedObjects);
@@ -40,6 +41,65 @@ export function ObjectInspector() {
   const removeToken = useTabletopStore((state) => state.removeToken);
   const object = findObject(map, selectedObjectId);
   const token = map.tokens.find((entry) => entry.id === selectedTokenId) || null;
+  const selectedTile = selectedTileCells.length === 1 && !object
+    ? findTile(map, selectedTileCells[0].layer, selectedTileCells[0].x, selectedTileCells[0].y)
+    : null;
+
+  if (selectedTile && selectedTileCells.length === 1) {
+    const selected = selectedTileCells[0];
+    const asset = getAsset(selectedTile.assetId, map.tilesets);
+    return (
+      <section className="rounded-lg border border-line bg-panel/90 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-black uppercase text-violet">Celula</p>
+          <span className="rounded-lg border border-line bg-white/5 px-2 py-1 text-xs text-textMuted">{selected.layer} {selected.x},{selected.y}</span>
+        </div>
+        <div className="mt-3 grid gap-3">
+          <div className="rounded-lg border border-line bg-white/5 p-2">
+            <strong className="block text-sm text-textMain">{asset?.name || selectedTile.assetId}</strong>
+            <span className="text-xs text-textMuted">{asset?.category || selected.layer}</span>
+          </div>
+          <NumberInput label="Rotacao" value={selectedTile.rotation || 0} step={45} onChange={(rotation) => updateSelectedTiles({ rotation })} />
+          {selected.layer === 'doors' ? (
+            <>
+              <label className="text-sm font-semibold text-textMuted">
+                Estado da porta
+                <select
+                  className="mt-1 w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-textMain"
+                  value={selectedTile.doorState || 'closed'}
+                  onChange={(event) => updateSelectedTiles({ doorState: event.target.value as DoorState })}
+                >
+                  <option value="open">Aberta</option>
+                  <option value="closed">Fechada</option>
+                  <option value="locked">Trancada</option>
+                </select>
+              </label>
+              <div className="grid gap-2">
+                <Toggle label="Bloqueia movimento" checked={Boolean(selectedTile.blocksMovement)} onChange={(blocksMovement) => updateSelectedTiles({ blocksMovement })} />
+                <Toggle label="Bloqueia visao" checked={Boolean(selectedTile.blocksVision)} onChange={(blocksVision) => updateSelectedTiles({ blocksVision })} />
+                <Toggle label="Bloqueia som" checked={Boolean(selectedTile.blocksSound)} onChange={(blocksSound) => updateSelectedTiles({ blocksSound })} />
+                <Toggle label="Interagivel" checked={Boolean(selectedTile.interactable)} onChange={(interactable) => updateSelectedTiles({ interactable })} />
+                <Toggle label="Secreta" checked={Boolean(selectedTile.secret)} onChange={(secret) => updateSelectedTiles({ secret })} />
+              </div>
+            </>
+          ) : null}
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" onClick={() => rotateSelectedObjects(45)}>Girar +45</Button>
+            <Button type="button" onClick={() => rotateSelectedObjects(-45)}>Girar -45</Button>
+            <Button type="button" tone="danger" onClick={removeSelectedObjects}>Apagar</Button>
+          </div>
+          <label className="text-sm font-semibold text-textMuted">
+            Nota do mestre
+            <textarea
+              className="mt-1 min-h-20 w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-textMain"
+              value={selectedTile.note || ''}
+              onChange={(event) => updateSelectedTiles({ note: event.target.value })}
+            />
+          </label>
+        </div>
+      </section>
+    );
+  }
 
   if (selectedObjectIds.length + selectedTileCells.length > 1 || (selectedTileCells.length && !object)) {
     const totalSelected = selectedObjectIds.length + selectedTileCells.length;
@@ -123,7 +183,7 @@ export function ObjectInspector() {
               </span>
               <div className="min-w-0">
                 <strong className="block truncate text-sm text-textMain">{asset.name}</strong>
-                <span className="text-xs text-textMuted">{asset.category} • {asset.theme || 'generico'}</span>
+                <span className="text-xs text-textMuted">{asset.category} - {asset.theme || 'generico'}</span>
               </div>
             </div>
           ) : null}
@@ -174,9 +234,35 @@ export function ObjectInspector() {
             <Toggle label="Travar objeto" checked={object.locked} onChange={(locked) => updateObject(object.id, { locked })} />
             <Toggle label="Bloqueia movimento" checked={object.blocksMovement} onChange={(blocksMovement) => updateObject(object.id, { blocksMovement })} />
             <Toggle label="Bloqueia visao" checked={object.blocksVision} onChange={(blocksVision) => updateObject(object.id, { blocksVision })} />
+            <Toggle label="Bloqueia som" checked={Boolean(object.blocksSound)} onChange={(blocksSound) => updateObject(object.id, { blocksSound })} />
             <Toggle label="Da cobertura" checked={object.givesCover} onChange={(givesCover) => updateObject(object.id, { givesCover })} />
             <Toggle label="Interagivel" checked={object.interactable} onChange={(interactable) => updateObject(object.id, { interactable })} />
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-sm font-semibold text-textMuted">
+              Cobertura
+              <select
+                className="mt-1 w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-textMain"
+                value={object.coverLevel || ''}
+                onChange={(event) => updateObject(object.id, { coverLevel: event.target.value ? event.target.value as MapObject['coverLevel'] : undefined })}
+              >
+                <option value="">Nenhuma</option>
+                <option value="low">Baixa</option>
+                <option value="high">Alta</option>
+              </select>
+            </label>
+            <TextInput label="DT / trava" value={object.difficulty || ''} onChange={(difficulty) => updateObject(object.id, { difficulty })} />
+          </div>
+          {object.kind === 'zone' ? (
+            <label className="text-sm font-semibold text-textMuted">
+              Efeito da zona
+              <textarea
+                className="mt-1 min-h-20 w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-textMain"
+                value={object.zoneEffect || ''}
+                onChange={(event) => updateObject(object.id, { zoneEffect: event.target.value })}
+              />
+            </label>
+          ) : null}
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" onClick={bringForward}>Frente</Button>
             <Button type="button" onClick={sendBackward}>Tras</Button>
@@ -229,7 +315,11 @@ export function ObjectInspector() {
             <NumberInput label="Y" value={token.y} onChange={(y) => updateToken(token.id, { y })} />
             <NumberInput label="PV" value={token.hpCurrent || 0} onChange={(hpCurrent) => updateToken(token.id, { hpCurrent })} />
             <NumberInput label="PV max" value={token.hpMax || 0} onChange={(hpMax) => updateToken(token.id, { hpMax })} />
+            <NumberInput label="Tamanho" value={token.size || 1} min={0.5} step={0.5} onChange={(size) => updateToken(token.id, { size })} />
+            <NumberInput label="Instabilidade" value={token.instability || 0} min={0} onChange={(instability) => updateToken(token.id, { instability })} />
           </div>
+          <TextInput label="Estado" value={token.status || ''} onChange={(status) => updateToken(token.id, { status })} />
+          <TextInput label="Aura" value={token.auraColor || ''} onChange={(auraColor) => updateToken(token.id, { auraColor })} />
           <label className="flex items-center gap-2 text-sm text-textMuted">
             <input
               className="accent-vita"
@@ -247,6 +337,15 @@ export function ObjectInspector() {
               onChange={(event) => updateToken(token.id, { locked: event.target.checked })}
             />
             Travar token
+          </label>
+          <label className="flex items-center gap-2 text-sm text-textMuted">
+            <input
+              className="accent-vita"
+              type="checkbox"
+              checked={Boolean(token.hidden)}
+              onChange={(event) => updateToken(token.id, { hidden: event.target.checked })}
+            />
+            Oculto no mapa
           </label>
           <Button type="button" tone="danger" onClick={() => removeToken(token.id)}>Remover token</Button>
         </div>
@@ -328,6 +427,19 @@ function NumberInput({
       />
     </label>
   );
+}
+
+function findTile(map: ReturnType<typeof useTabletopStore.getState>['map'], layer: TileLayerKey, x: number, y: number): TileCell | null {
+  return map.tileLayers[layer].cells.find((cell) => {
+    const footprint = resolveFootprint(cell.footprint, cell.rotation || 0);
+    return x >= cell.x && x < cell.x + footprint.w && y >= cell.y && y < cell.y + footprint.h;
+  }) || null;
+}
+
+function resolveFootprint(footprint: TileCell['footprint'], rotation = 0) {
+  const base = footprint || { w: 1, h: 1 };
+  const normalized = ((Math.round(rotation / 45) * 45) % 360 + 360) % 360;
+  return normalized === 90 || normalized === 270 ? { w: base.h, h: base.w } : base;
 }
 
 function findObject(map: ReturnType<typeof useTabletopStore.getState>['map'], objectId: string): MapObject | null {

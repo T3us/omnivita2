@@ -24,6 +24,7 @@ import type {
   SnapMode,
   TabletopMode,
   TabletopToken,
+  TileCell,
   TileLayerKey
 } from './types';
 
@@ -61,6 +62,7 @@ interface TabletopStore {
   setSnapMode(mode: SnapMode): void;
   setEraseMode(mode: EraseMode): void;
   rotatePlacement(delta: number): void;
+  resetPlacementRotation(): void;
   setBrushSize(size: number): void;
   toggleGrid(): void;
   setTransforming(value: boolean): void;
@@ -88,6 +90,7 @@ interface TabletopStore {
   selectObjectsInRect(rect: { x: number; y: number; width: number; height: number }, additive?: boolean): void;
   selectArea(rect: { x: number; y: number; width: number; height: number }, additive?: boolean): void;
   clearObjectSelection(): void;
+  updateSelectedTiles(patch: Partial<TileCell>): void;
   updateSelectedObjects(patch: Partial<MapObject>): void;
   moveSelectedObjects(deltaX: number, deltaY: number, snapOverride?: SnapMode | null): void;
   nudgeSelectedObjects(deltaX: number, deltaY: number): void;
@@ -246,6 +249,10 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     set((state) => ({ placementRotation: normalizeRotation45(state.placementRotation + delta) }));
   },
 
+  resetPlacementRotation() {
+    set({ placementRotation: 0 });
+  },
+
   setBrushSize(size) {
     const allowed = [1, 2, 3, 5];
     const closest = allowed.reduce((best, current) => Math.abs(current - size) < Math.abs(best - size) ? current : best, 1);
@@ -316,7 +323,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       if (targetLayer === 'floor' || targetLayer === 'walls' || targetLayer === 'doors' || targetLayer === 'collision') {
         if (next.tileLayers[targetLayer].locked || next.tileLayers[targetLayer].editable === false) return state;
         const asset = getAssetFromMap(next, selectedAsset);
-        next.tileLayers[targetLayer].cells = setTileCell(next.tileLayers[targetLayer].cells, x, y, selectedAsset, state.placementRotation, asset?.gridFootprint);
+        next.tileLayers[targetLayer].cells = setTileCell(next.tileLayers[targetLayer].cells, x, y, selectedAsset, state.placementRotation, asset?.gridFootprint, getTileMetaForAsset(asset, targetLayer));
         return { map: next, dirty: true };
       }
       return state;
@@ -336,7 +343,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         const asset = getAssetFromMap(next, selectedAsset);
         getBrushCells(x, y, brushSize).forEach((cell) => {
           if (!isInsideCell(next, cell.x, cell.y)) return;
-          target.cells = setTileCell(target.cells, cell.x, cell.y, selectedAsset, state.placementRotation, asset?.gridFootprint);
+          target.cells = setTileCell(target.cells, cell.x, cell.y, selectedAsset, state.placementRotation, asset?.gridFootprint, getTileMetaForAsset(asset, targetLayer));
         });
         return { map: next, dirty: true };
       }
@@ -390,6 +397,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const layer = getObjectTargetLayer(next, assetId);
       const object = buildMapObject(assetId, x, y, layer, getNextLayerZIndex(next, layer), next.tilesets);
       object.rotation = normalizeRotation45(state.placementRotation);
+      if (object.zIndex < 1) object.zIndex = getNextLayerZIndex(next, layer);
       const point = snapPoint(next, x, y, resolveObjectSnapMode(object, state.snapMode), parentId);
       object.x = point.x;
       object.y = point.y;
@@ -417,13 +425,20 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const target = next.tileLayers.doors;
       if (target.locked || target.editable === false) return state;
       const asset = getAssetFromMap(next, selectedAsset);
+      const doorState = 'closed';
       target.cells = setTileCell(
         target.cells,
         x,
         y,
         selectedAsset,
         normalizeRotation45(rotation ?? state.placementRotation),
-        asset?.gridFootprint || { w: 1, h: 1 }
+        asset?.gridFootprint || { w: 1, h: 1 },
+        {
+          doorState,
+          blocksMovement: Boolean(asset?.defaultBlocksMovement ?? asset?.blocksMovement ?? true),
+          blocksVision: Boolean(asset?.defaultBlocksVision ?? asset?.blocksVision ?? true),
+          interactable: true
+        }
       );
       const selectedTileCells = [{ layer: 'doors' as TileLayerKey, x, y }];
       return {
@@ -527,7 +542,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         const original = findTileAtCell(next, cell.layer, cell.x, cell.y);
         if (!original) return;
         const target = { layer: cell.layer, x: Math.min(next.width - 1, cell.x + 1), y: Math.min(next.height - 1, cell.y + 1) };
-        layer.cells = setTileCell(layer.cells, target.x, target.y, original.assetId, original.rotation || 0, original.footprint);
+        layer.cells = setTileCell(layer.cells, target.x, target.y, original.assetId, original.rotation || 0, original.footprint, copyTileMeta(original));
         nextTileCells.push(target);
       });
       return {
@@ -625,6 +640,34 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
 
   clearObjectSelection() {
     set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedTokenId: '' });
+  },
+
+  updateSelectedTiles(patch) {
+    set((state) => {
+      if (!state.selectedTileCells.length) return state;
+      const history = pushHistory(state);
+      const next = cloneMap(state.map);
+      state.selectedTileCells.forEach((selected) => {
+        const layer = next.tileLayers[selected.layer];
+        if (!layer || layer.locked || layer.editable === false) return;
+        const tile = findTileAtCell(next, selected.layer, selected.x, selected.y);
+        if (!tile) return;
+        Object.assign(tile, patch);
+        if (patch.rotation !== undefined) tile.rotation = normalizeRotation45(Number(patch.rotation));
+        if (patch.doorState) {
+          tile.doorState = patch.doorState;
+          if (patch.doorState === 'open') {
+            tile.blocksMovement = false;
+            tile.blocksVision = false;
+          } else {
+            tile.blocksMovement = true;
+            tile.blocksVision = true;
+          }
+          tile.interactable = true;
+        }
+      });
+      return { map: next, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+    });
   },
 
   updateSelectedObjects(patch) {
@@ -1239,6 +1282,28 @@ function objectContainsPoint(object: MapObject, x: number, y: number) {
   return x >= object.x && x <= object.x + width && y >= object.y && y <= object.y + height;
 }
 
+function getTileMetaForAsset(asset: AssetDefinition | null, layer: MapLayerKey): Partial<TileCell> {
+  if (layer !== 'doors') return {};
+  return {
+    doorState: 'closed',
+    blocksMovement: Boolean(asset?.defaultBlocksMovement ?? asset?.blocksMovement ?? true),
+    blocksVision: Boolean(asset?.defaultBlocksVision ?? asset?.blocksVision ?? true),
+    interactable: true
+  };
+}
+
+function copyTileMeta(tile: TileCell): Partial<TileCell> {
+  return {
+    doorState: tile.doorState,
+    blocksMovement: tile.blocksMovement,
+    blocksVision: tile.blocksVision,
+    blocksSound: tile.blocksSound,
+    interactable: tile.interactable,
+    secret: tile.secret,
+    note: tile.note
+  };
+}
+
 function snapPoint(map: OmniMap, x: number, y: number, snapMode: SnapMode, alignObjectId?: string) {
   if (snapMode === 'free') return { x, y };
   if (snapMode === 'fine') return { x: Math.round(x / 4) * 4, y: Math.round(y / 4) * 4 };
@@ -1253,7 +1318,7 @@ function snapPoint(map: OmniMap, x: number, y: number, snapMode: SnapMode, align
 }
 
 function resolveObjectSnapMode(object: MapObject, globalSnapMode: SnapMode): SnapMode {
-  if (globalSnapMode === 'grid' || globalSnapMode === 'fine' || globalSnapMode === 'object') return globalSnapMode;
+  if (globalSnapMode === 'grid' || globalSnapMode === 'fine' || globalSnapMode === 'free' || globalSnapMode === 'object') return globalSnapMode;
   return object.snapMode || 'free';
 }
 
@@ -1364,7 +1429,7 @@ function moveSelectedTileCells(map: OmniMap, selected: SelectedTileCell[], dx: n
     const layer = map.tileLayers[layerKey];
     const nextX = Math.max(0, Math.min(map.width - 1, original.x + dx));
     const nextY = Math.max(0, Math.min(map.height - 1, original.y + dy));
-    layer.cells = setTileCell(layer.cells, nextX, nextY, original.assetId, original.rotation || 0, original.footprint);
+    layer.cells = setTileCell(layer.cells, nextX, nextY, original.assetId, original.rotation || 0, original.footprint, copyTileMeta(original));
     moved.push({ layer: layerKey, x: nextX, y: nextY });
   });
   return uniqueTileCells(moved);

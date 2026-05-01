@@ -145,11 +145,12 @@ export interface OmnivitaCodeEvaluationResponse {
 
 export type TabletopMode = 'build' | 'session';
 export type MapLayerKey = 'floor' | 'walls' | 'doors' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
-export type MapTool = 'select' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'token';
+export type MapTool = 'select' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token';
 export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
 export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
 export type EraseMode = 'activeLayer' | 'topVisible' | 'allUnlocked';
+export type DoorState = 'open' | 'closed' | 'locked';
 export type AssetTypeCategory = 'floor' | 'wall' | 'door' | 'window' | 'door-window' | 'furniture' | 'prop' | 'detail' | 'light' | 'mechanic' | 'note' | 'fog';
 export type AssetTheme = 'cidade-baixo' | 'instituto' | 'laboratorio-canal' | 'zona-profunda' | 'urbano' | 'alienigena' | 'generico' | 'escola' | 'esgoto';
 export type TileLayerKey = 'floor' | 'walls' | 'doors' | 'collision';
@@ -184,6 +185,7 @@ export interface AssetDefinition {
   defaultSnapMode?: SnapMode;
   gridFootprint?: GridFootprint;
   orientations?: number[];
+  zIndexDefault?: number;
   defaultOpacity?: number;
   defaultInteractable?: boolean;
   color?: string;
@@ -210,6 +212,13 @@ export interface TileCell {
   assetId: string;
   rotation?: number;
   footprint?: GridFootprint;
+  doorState?: DoorState;
+  blocksMovement?: boolean;
+  blocksVision?: boolean;
+  blocksSound?: boolean;
+  interactable?: boolean;
+  secret?: boolean;
+  note?: string;
 }
 
 export interface TileLayer {
@@ -264,9 +273,12 @@ export interface MapObject {
   parentId?: string;
   blocksMovement: boolean;
   blocksVision: boolean;
+  blocksSound?: boolean;
   givesCover: boolean;
+  coverLevel?: 'low' | 'high';
   interactable: boolean;
   note?: string;
+  difficulty?: string;
   kind: MapObjectKind;
   name: string;
   groupId?: string;
@@ -274,6 +286,8 @@ export interface MapObject {
   visibleToPlayers: boolean;
   color?: string;
   light?: LightSource;
+  tokenState?: string;
+  zoneEffect?: string;
 }
 
 export interface ObjectLayer {
@@ -313,6 +327,11 @@ export interface TabletopToken {
   hpMax?: number;
   visibleToPlayers: boolean;
   locked: boolean;
+  status?: string;
+  size?: number;
+  auraColor?: string;
+  instability?: number;
+  hidden?: boolean;
 }
 
 export interface OmniMap {

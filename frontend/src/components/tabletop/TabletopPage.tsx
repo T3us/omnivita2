@@ -40,7 +40,7 @@ export function TabletopPage({
   const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
   const [message, setMessage] = useState('');
   const [leftTab, setLeftTab] = useState<'map' | 'assets' | 'tools'>('assets');
-  const [rightTab, setRightTab] = useState<'layers' | 'inspector' | 'session'>('layers');
+  const [rightTab, setRightTab] = useState<'layers' | 'inspector' | 'selection' | 'session'>('layers');
   const availableTokens = useMemo(() => buildAvailableTokens(characters, combatants), [characters, combatants]);
   const selectedAsset = getAsset(selectedAssetId, map.tilesets);
 
@@ -182,11 +182,18 @@ export function TabletopPage({
             tabs={[
               { id: 'layers', label: 'Camadas' },
               { id: 'inspector', label: 'Inspetor' },
+              { id: 'selection', label: 'Selecao' },
               { id: 'session', label: 'Sessao' }
             ]}
           />
           {rightTab === 'layers' ? <LayerPanel /> : null}
           {rightTab === 'inspector' ? <ObjectInspector /> : null}
+          {rightTab === 'selection' ? (
+            <>
+              <SelectionReadout objects={selectedObjectIds.length} cells={selectedTileCells.length} />
+              <ObjectInspector />
+            </>
+          ) : null}
           {rightTab === 'session' ? (
             <>
               {map.mode === 'session' ? <TokenPanel tokens={availableTokens} /> : null}
@@ -254,7 +261,7 @@ function PanelTabs<T extends string>({
   onChange(value: T): void;
 }) {
   return (
-    <div className="grid grid-cols-3 gap-2 rounded-lg border border-line bg-panel/90 p-2">
+    <div className="grid gap-2 rounded-lg border border-line bg-panel/90 p-2" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -323,6 +330,7 @@ function ShortcutPanel() {
   const lines = [
     'V selecionar, B piso, W parede, O objeto',
     'D porta, L luz, N nota, F fog, C colisao, E apagar',
+    'M regua, P ping',
     'Delete remove, Ctrl+D duplica, Ctrl+Z desfaz',
     'R gira +45, Shift+R gira -45',
     'Setas movem 1px, Alt+setas 4px, Shift+setas 1 celula',
@@ -350,6 +358,19 @@ function SessionReadout({ map }: { map: OmniMap }) {
         <MiniStat label="Objetos" value={map.objectLayer.objects.length + map.decorationLayer.objects.length + map.detailLayer.objects.length} />
         <MiniStat label="Fog" value={map.fogLayer.revealedCells.length} />
       </div>
+    </section>
+  );
+}
+
+function SelectionReadout({ objects, cells }: { objects: number; cells: number }) {
+  return (
+    <section className="rounded-lg border border-line bg-panel/90 p-3">
+      <p className="text-xs font-black uppercase text-violet">Selecao</p>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <MiniStat label="Objetos" value={objects} />
+        <MiniStat label="Celulas" value={cells} />
+      </div>
+      <p className="mt-2 text-xs text-textMuted">Use V para selecionar, Shift+clique para somar e arraste no vazio para selecionar area.</p>
     </section>
   );
 }

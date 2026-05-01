@@ -19,13 +19,17 @@ const buildTools: Array<{ id: MapTool; label: string }> = [
   { id: 'zone', label: 'Zona' },
   { id: 'note', label: 'Nota' },
   { id: 'fog', label: 'Fog' },
+  { id: 'measure', label: 'Regua' },
+  { id: 'ping', label: 'Ping' },
   { id: 'erase', label: 'Apagar' }
 ];
 
 const sessionTools: Array<{ id: MapTool; label: string }> = [
+  { id: 'select', label: 'Selecionar' },
   { id: 'token', label: 'Token' },
+  { id: 'measure', label: 'Regua' },
+  { id: 'ping', label: 'Ping' },
   { id: 'fog', label: 'Fog' },
-  { id: 'select', label: 'Selecionar' }
 ];
 
 const snapModes: Array<{ id: SnapMode; label: string }> = [
@@ -62,6 +66,7 @@ export function MapToolbar({
   const canUndo = useTabletopStore((state) => state.historyPast.length > 0);
   const canRedo = useTabletopStore((state) => state.historyFuture.length > 0);
   const dirty = useTabletopStore((state) => state.dirty);
+  const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
   const setMode = useTabletopStore((state) => state.setMode);
   const setTool = useTabletopStore((state) => state.setTool);
   const setZoom = useTabletopStore((state) => state.setZoom);
@@ -79,6 +84,7 @@ export function MapToolbar({
   const nudgeSelectedObjects = useTabletopStore((state) => state.nudgeSelectedObjects);
   const rotateSelectedObjects = useTabletopStore((state) => state.rotateSelectedObjects);
   const rotatePlacement = useTabletopStore((state) => state.rotatePlacement);
+  const resetPlacementRotation = useTabletopStore((state) => state.resetPlacementRotation);
   const clearObjectSelection = useTabletopStore((state) => state.clearObjectSelection);
   const groupSelectedObjects = useTabletopStore((state) => state.groupSelectedObjects);
   const ungroupSelectedObjects = useTabletopStore((state) => state.ungroupSelectedObjects);
@@ -118,6 +124,10 @@ export function MapToolbar({
       }
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (isPlacementTool(tool)) {
+          resetPlacementRotation();
+          setTool('select');
+        }
         clearObjectSelection();
         return;
       }
@@ -131,8 +141,8 @@ export function MapToolbar({
       }
       if (key === 'r') {
         event.preventDefault();
-        if (hasSelection) rotateSelectedObjects(event.shiftKey ? -45 : 45);
-        else rotatePlacement(event.shiftKey ? -45 : 45);
+        if (isPlacementTool(tool) && selectedAssetId) rotatePlacement(event.shiftKey ? -45 : 45);
+        else if (tool === 'select' && hasSelection) rotateSelectedObjects(event.shiftKey ? -45 : 45);
         return;
       }
       const toolByKey: Partial<Record<string, MapTool>> = {
@@ -145,7 +155,9 @@ export function MapToolbar({
         c: 'collision',
         o: 'object',
         l: 'light',
-        n: 'note'
+        n: 'note',
+        m: 'measure',
+        p: 'ping'
       };
       if (key === 'l' && event.shiftKey) {
         event.preventDefault();
@@ -172,7 +184,7 @@ export function MapToolbar({
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [brushSize, clearObjectSelection, duplicateSelectedObjects, groupSelectedObjects, map.gridSize, nudgeSelectedObjects, redo, removeSelectedObjects, rotatePlacement, rotateSelectedObjects, selectedObjectIds.length, selectedTileCells.length, setBrushSize, setTool, toggleActiveLayerLock, toggleGrid, tool, undo, ungroupSelectedObjects]);
+  }, [brushSize, clearObjectSelection, duplicateSelectedObjects, groupSelectedObjects, map.gridSize, nudgeSelectedObjects, redo, removeSelectedObjects, resetPlacementRotation, rotatePlacement, rotateSelectedObjects, selectedAssetId, selectedObjectIds.length, selectedTileCells.length, setBrushSize, setTool, toggleActiveLayerLock, toggleGrid, tool, undo, ungroupSelectedObjects]);
 
   return (
     <section className="rounded-lg border border-line bg-panel/90 p-3">
@@ -309,6 +321,10 @@ function arrowDelta(key: string, step: number) {
   if (key === 'ArrowUp') return { x: 0, y: -step };
   if (key === 'ArrowDown') return { x: 0, y: step };
   return { x: 0, y: 0 };
+}
+
+function isPlacementTool(tool: MapTool) {
+  return tool === 'object' || tool === 'door' || tool === 'cover' || tool === 'terminal' || tool === 'light' || tool === 'zone' || tool === 'note';
 }
 
 function ModeButton({ mode, current, onClick, children }: { mode: TabletopMode; current: TabletopMode; onClick(mode: TabletopMode): void; children: ReactNode }) {
