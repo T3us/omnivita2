@@ -151,6 +151,8 @@ export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'o
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
 export type EraseMode = 'activeLayer' | 'topVisible' | 'allUnlocked';
 export type DoorState = 'open' | 'closed' | 'locked';
+export type FogMode = 'manual' | 'dynamic';
+export type SessionViewMode = 'gm' | 'player-preview';
 export type AssetTypeCategory = 'floor' | 'wall' | 'door' | 'window' | 'door-window' | 'furniture' | 'prop' | 'detail' | 'light' | 'mechanic' | 'note' | 'fog';
 export type AssetTheme = 'cidade-baixo' | 'instituto' | 'laboratorio-canal' | 'zona-profunda' | 'urbano' | 'alienigena' | 'generico' | 'escola' | 'esgoto';
 export type TileLayerKey = 'floor' | 'walls' | 'doors' | 'collision';
@@ -318,20 +320,75 @@ export interface FogLayer {
 export interface TabletopToken {
   id: string;
   sourceId: string;
+  characterId?: string;
+  combatantId?: string;
   kind: TabletopTokenKind;
   name: string;
   image?: string;
   x: number;
   y: number;
+  controlledBy?: string;
   hpCurrent?: number;
   hpMax?: number;
+  peCurrent?: number;
+  peMax?: number;
+  pdCurrent?: number;
+  pdMax?: number;
   visibleToPlayers: boolean;
   locked: boolean;
   status?: string;
+  statusMarkers?: string[];
   size?: number;
+  visionEnabled?: boolean;
+  visionRadius?: number;
+  dimVisionRadius?: number;
+  brightVisionRadius?: number;
+  lightRadius?: number;
   auraColor?: string;
   instability?: number;
   hidden?: boolean;
+}
+
+export interface SessionMapInstance {
+  id: string;
+  sourceMapId: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  gridSize: number;
+  rotation: number;
+  locked: boolean;
+  visibleToPlayers: boolean;
+}
+
+export interface SessionBoard {
+  id: string;
+  name: string;
+  maps: SessionMapInstance[];
+  activeMapInstanceId?: string;
+  camera: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+  globalDarkness: number;
+  ambientLight: number;
+  fogEnabled: boolean;
+  dynamicVisionEnabled: boolean;
+  viewMode: SessionViewMode;
+}
+
+export interface FogState {
+  enabled: boolean;
+  mode: FogMode;
+  unexploredOpacity: number;
+  exploredOpacity: number;
+  visibleOpacity: number;
+  exploredCells: Array<{ x: number; y: number }>;
+  manualHiddenCells: Array<{ x: number; y: number }>;
+  manualRevealedCells: Array<{ x: number; y: number }>;
 }
 
 export interface OmniMap {

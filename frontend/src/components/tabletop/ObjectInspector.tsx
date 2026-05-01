@@ -18,6 +18,7 @@ export function ObjectInspector() {
   const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
   const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
   const selectedTokenId = useTabletopStore((state) => state.selectedTokenId);
+  const selectedTokenIds = useTabletopStore((state) => state.selectedTokenIds);
   const bringForward = useTabletopStore((state) => state.bringForward);
   const sendBackward = useTabletopStore((state) => state.sendBackward);
   const moveLayer = useTabletopStore((state) => state.moveLayer);
@@ -38,7 +39,9 @@ export function ObjectInspector() {
   const removeObject = useTabletopStore((state) => state.removeObject);
   const duplicateSelectedObjects = useTabletopStore((state) => state.duplicateSelectedObjects);
   const updateToken = useTabletopStore((state) => state.updateToken);
+  const updateSelectedTokens = useTabletopStore((state) => state.updateSelectedTokens);
   const removeToken = useTabletopStore((state) => state.removeToken);
+  const removeSelectedTokens = useTabletopStore((state) => state.removeSelectedTokens);
   const object = findObject(map, selectedObjectId);
   const token = map.tokens.find((entry) => entry.id === selectedTokenId) || null;
   const selectedTile = selectedTileCells.length === 1 && !object
@@ -96,6 +99,30 @@ export function ObjectInspector() {
               onChange={(event) => updateSelectedTiles({ note: event.target.value })}
             />
           </label>
+        </div>
+      </section>
+    );
+  }
+
+  if (selectedTokenIds.length > 1 && !object && !selectedTileCells.length) {
+    return (
+      <section className="rounded-lg border border-line bg-panel/90 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-black uppercase text-violet">Tokens</p>
+          <span className="rounded-lg border border-line bg-white/5 px-2 py-1 text-xs text-textMuted">{selectedTokenIds.length} selecionados</span>
+        </div>
+        <div className="mt-3 grid gap-3">
+          <div className="grid gap-2">
+            <Toggle label="Visivel para jogadores" checked onChange={(visibleToPlayers) => updateSelectedTokens({ visibleToPlayers, hidden: !visibleToPlayers })} />
+            <Toggle label="Travar tokens" checked={false} onChange={(locked) => updateSelectedTokens({ locked })} />
+            <Toggle label="Visao ativa" checked onChange={(visionEnabled) => updateSelectedTokens({ visionEnabled })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <NumberInput label="Raio de visao" value={6} min={0} onChange={(visionRadius) => updateSelectedTokens({ visionRadius })} />
+            <NumberInput label="Luz propria" value={0} min={0} onChange={(lightRadius) => updateSelectedTokens({ lightRadius })} />
+          </div>
+          <TextInput label="Status visual" value="" onChange={(status) => updateSelectedTokens({ status })} />
+          <Button type="button" tone="danger" onClick={removeSelectedTokens}>Remover tokens</Button>
         </div>
       </section>
     );
@@ -315,11 +342,27 @@ export function ObjectInspector() {
             <NumberInput label="Y" value={token.y} onChange={(y) => updateToken(token.id, { y })} />
             <NumberInput label="PV" value={token.hpCurrent || 0} onChange={(hpCurrent) => updateToken(token.id, { hpCurrent })} />
             <NumberInput label="PV max" value={token.hpMax || 0} onChange={(hpMax) => updateToken(token.id, { hpMax })} />
+            <NumberInput label="PE" value={token.peCurrent || 0} onChange={(peCurrent) => updateToken(token.id, { peCurrent })} />
+            <NumberInput label="PD" value={token.pdCurrent || 0} onChange={(pdCurrent) => updateToken(token.id, { pdCurrent })} />
             <NumberInput label="Tamanho" value={token.size || 1} min={0.5} step={0.5} onChange={(size) => updateToken(token.id, { size })} />
             <NumberInput label="Instabilidade" value={token.instability || 0} min={0} onChange={(instability) => updateToken(token.id, { instability })} />
+            <NumberInput label="Raio de visao" value={token.visionRadius || 0} min={0} onChange={(visionRadius) => updateToken(token.id, { visionRadius })} />
+            <NumberInput label="Visao clara" value={token.brightVisionRadius || 0} min={0} onChange={(brightVisionRadius) => updateToken(token.id, { brightVisionRadius })} />
+            <NumberInput label="Visao fraca" value={token.dimVisionRadius || 0} min={0} onChange={(dimVisionRadius) => updateToken(token.id, { dimVisionRadius })} />
+            <NumberInput label="Luz propria" value={token.lightRadius || 0} min={0} onChange={(lightRadius) => updateToken(token.id, { lightRadius })} />
           </div>
           <TextInput label="Estado" value={token.status || ''} onChange={(status) => updateToken(token.id, { status })} />
+          <TextInput label="Marcadores" value={(token.statusMarkers || []).join(', ')} onChange={(value) => updateToken(token.id, { statusMarkers: value.split(',').map((entry) => entry.trim()).filter(Boolean) })} />
           <TextInput label="Aura" value={token.auraColor || ''} onChange={(auraColor) => updateToken(token.id, { auraColor })} />
+          <label className="flex items-center gap-2 text-sm text-textMuted">
+            <input
+              className="accent-vita"
+              type="checkbox"
+              checked={token.visionEnabled !== false}
+              onChange={(event) => updateToken(token.id, { visionEnabled: event.target.checked })}
+            />
+            Visao dinamica ativa
+          </label>
           <label className="flex items-center gap-2 text-sm text-textMuted">
             <input
               className="accent-vita"

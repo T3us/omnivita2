@@ -12,6 +12,7 @@ import { MapStage } from './MapStage';
 import { MapToolbar } from './MapToolbar';
 import { useTabletopStore } from './mapStore';
 import { ObjectInspector } from './ObjectInspector';
+import { SessionModeView } from './session/SessionModeView';
 import { TokenPanel } from './TokenPanel';
 import type { AvailableTabletopToken, EraseMode, MapLayerKey, MapTool, OmniMap, SnapMode } from './types';
 
@@ -65,7 +66,7 @@ export function TabletopPage({
   const loadMutation = useMutation({
     mutationFn: (mapId: string) => api.getMap(mapId),
     onSuccess: (result) => {
-      setMap(result.map);
+      setMap({ ...result.map, mode: map.mode === 'session' ? 'session' : result.map.mode });
       setMessage('Mapa carregado.');
     },
     onError: (error) => {
@@ -122,9 +123,20 @@ export function TabletopPage({
         </div>
       </Card>
 
-      <MapToolbar saving={saving} onNew={handleNew} onSave={handleSave} onDelete={handleDelete} />
+      {map.mode === 'session' ? (
+        <SessionModeView
+          tokens={availableTokens}
+          maps={maps}
+          mapsLoading={mapsQuery.isLoading || loadMutation.isPending}
+          saving={saving}
+          onSave={handleSave}
+          onLoadMap={(mapId) => loadMutation.mutate(mapId)}
+        />
+      ) : (
+        <>
+          <MapToolbar saving={saving} onNew={handleNew} onSave={handleSave} onDelete={handleDelete} />
 
-      <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+          <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
         <div className="grid content-start gap-4">
           <PanelTabs
             value={leftTab}
@@ -196,12 +208,13 @@ export function TabletopPage({
           ) : null}
           {rightTab === 'session' ? (
             <>
-              {map.mode === 'session' ? <TokenPanel tokens={availableTokens} /> : null}
               <SessionReadout map={map} />
             </>
           ) : null}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }
