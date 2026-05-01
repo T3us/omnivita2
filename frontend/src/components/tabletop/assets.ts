@@ -13,6 +13,8 @@ type AssetInput = {
   height: number;
   kind?: Asset['kind'];
   snapMode?: SnapMode;
+  gridFootprint?: Asset['gridFootprint'];
+  orientations?: number[];
   tags?: string[];
   blocksMovement?: boolean;
   blocksVision?: boolean;
@@ -26,6 +28,8 @@ type AssetInput = {
 export const ASSET_TYPE_LABELS: Record<AssetTypeCategory, string> = {
   floor: 'Pisos',
   wall: 'Paredes',
+  door: 'Portas',
+  window: 'Janelas',
   'door-window': 'Portas e Janelas',
   furniture: 'Moveis',
   prop: 'Props',
@@ -43,7 +47,9 @@ export const ASSET_THEME_LABELS: Record<AssetTheme, string> = {
   'zona-profunda': 'Zona Profunda',
   urbano: 'Urbano',
   alienigena: 'Alienigena',
-  generico: 'Generico'
+  generico: 'Generico',
+  escola: 'Escola',
+  esgoto: 'Esgoto'
 };
 
 function asset(input: AssetInput): Asset {
@@ -65,6 +71,8 @@ function asset(input: AssetInput): Asset {
     defaultGivesCover: Boolean(input.givesCover),
     defaultInteractable: Boolean(input.interactable),
     defaultSnapMode: input.snapMode || inferSnapFromType(input.typeCategory),
+    gridFootprint: input.gridFootprint,
+    orientations: input.orientations,
     defaultOpacity: input.opacity,
     kind: input.kind,
     color: input.color,
@@ -93,7 +101,8 @@ export const DEFAULT_ASSETS: Asset[] = [
   asset({ id: 'crate-urban', name: 'Caixa', typeCategory: 'prop', theme: 'urbano', image: 'crate-urban.png', layer: 'objects', width: 72, height: 72, kind: 'prop', tags: ['prop', 'cobertura'], snapMode: 'free', blocksMovement: true, givesCover: true, color: '#76523a', stroke: '#d3a36f' }),
   asset({ id: 'chair-dark', name: 'Cadeira', typeCategory: 'furniture', theme: 'generico', image: 'chair-dark.png', layer: 'objects', width: 48, height: 48, kind: 'prop', tags: ['movel', 'cadeira'], snapMode: 'free', blocksMovement: true, color: '#393041', stroke: '#a78bfa' }),
   asset({ id: 'terminal-purple', name: 'Terminal', typeCategory: 'mechanic', theme: 'instituto', image: 'terminal-purple.png', layer: 'mechanics', width: 72, height: 64, kind: 'terminal', tags: ['tecnologia', 'interacao'], snapMode: 'free', blocksMovement: true, interactable: true, color: '#27124a', stroke: '#a855f7' }),
-  asset({ id: 'door-metal', name: 'Porta metalica', typeCategory: 'door-window', theme: 'urbano', image: 'door-metal.png', layer: 'objects', width: 96, height: 32, kind: 'door', tags: ['porta', 'interacao'], snapMode: 'fine', blocksMovement: true, blocksVision: true, interactable: true, color: '#262330', stroke: '#ddd6fe' }),
+  asset({ id: 'door-metal', name: 'Porta metalica 2x1', typeCategory: 'door', theme: 'urbano', image: 'door-metal.png', layer: 'doors', width: 64, height: 32, kind: 'door', tags: ['porta', 'metal', 'entrada'], snapMode: 'grid', gridFootprint: { w: 2, h: 1 }, orientations: [0, 90, 180, 270], blocksMovement: true, blocksVision: true, interactable: true, color: '#262330', stroke: '#ddd6fe' }),
+  asset({ id: 'door-metal-single', name: 'Porta metalica 1x1', typeCategory: 'door', theme: 'instituto', image: 'door-metal.png', layer: 'doors', width: 32, height: 32, kind: 'door', tags: ['porta', 'metal', 'pequena'], snapMode: 'grid', gridFootprint: { w: 1, h: 1 }, orientations: [0, 90, 180, 270], blocksMovement: true, blocksVision: true, interactable: true, color: '#262330', stroke: '#ddd6fe' }),
   asset({ id: 'cover-low', name: 'Cobertura baixa', typeCategory: 'mechanic', theme: 'urbano', image: 'crate-urban.png', layer: 'mechanics', width: 96, height: 40, kind: 'cover', tags: ['combate', 'cobertura'], snapMode: 'free', blocksMovement: true, givesCover: true, color: '#4a3c56', stroke: '#f59e0b' }),
   asset({ id: 'tube-canal', name: 'Tubo do canal', typeCategory: 'prop', theme: 'laboratorio-canal', image: 'tube-canal.png', layer: 'objects', width: 96, height: 40, kind: 'prop', tags: ['tubo', 'maquina', 'canal'], snapMode: 'free', blocksMovement: true, blocksVision: false, givesCover: true, color: '#0f172a', stroke: '#67e8f9' }),
 
@@ -164,6 +173,8 @@ export function normalizeAsset(input: Partial<Asset> | null | undefined): Asset 
     defaultGivesCover: Boolean(input.defaultGivesCover ?? input.givesCover),
     defaultInteractable: Boolean(input.defaultInteractable ?? input.interactable),
     defaultSnapMode: normalizeSnapMode(input.defaultSnapMode) || inferSnapFromType(typeCategory),
+    gridFootprint: input.gridFootprint,
+    orientations: input.orientations,
     defaultOpacity: input.defaultOpacity,
     kind,
     color: input.color,
@@ -187,6 +198,7 @@ export function makeCustomAsset(input: Omit<Asset, 'id'> & { id?: string }): Ass
 function inferKindFromLayer(layer?: MapLayerKey): Asset['kind'] {
   if (layer === 'floor') return 'floor';
   if (layer === 'walls') return 'wall';
+  if (layer === 'doors') return 'door';
   if (layer === 'lighting') return 'light';
   if (layer === 'notes') return 'note';
   if (layer === 'details') return 'decal';
@@ -197,6 +209,7 @@ function inferKindFromLayer(layer?: MapLayerKey): Asset['kind'] {
 function inferLayerFromKind(kind?: Asset['kind']): MapLayerKey {
   if (kind === 'floor') return 'floor';
   if (kind === 'wall') return 'walls';
+  if (kind === 'door') return 'doors';
   if (kind === 'decal' || kind === 'shadow') return 'details';
   if (kind === 'light') return 'lighting';
   if (kind === 'note') return 'notes';
@@ -206,8 +219,7 @@ function inferLayerFromKind(kind?: Asset['kind']): MapLayerKey {
 }
 
 function inferSnapFromType(typeCategory: AssetTypeCategory): SnapMode {
-  if (typeCategory === 'floor' || typeCategory === 'wall' || typeCategory === 'fog') return 'grid';
-  if (typeCategory === 'door-window') return 'fine';
+  if (typeCategory === 'floor' || typeCategory === 'wall' || typeCategory === 'door' || typeCategory === 'window' || typeCategory === 'door-window' || typeCategory === 'fog') return 'grid';
   return 'free';
 }
 
@@ -225,7 +237,8 @@ function normalizeTypeCategory(
   const legacy = String(legacyCategory || '').toLowerCase();
   if (legacy.includes('piso')) return 'floor';
   if (legacy.includes('parede')) return 'wall';
-  if (legacy.includes('porta') || legacy.includes('janela')) return 'door-window';
+  if (legacy.includes('porta')) return 'door';
+  if (legacy.includes('janela')) return 'window';
   if (legacy.includes('move')) return 'furniture';
   if (legacy.includes('luz')) return 'light';
   if (legacy.includes('nota')) return 'note';
@@ -233,7 +246,7 @@ function normalizeTypeCategory(
   if (legacy.includes('decal') || legacy.includes('detalhe')) return 'detail';
   if (kind === 'floor' || layer === 'floor') return 'floor';
   if (kind === 'wall' || layer === 'walls') return 'wall';
-  if (kind === 'door') return 'door-window';
+  if (kind === 'door' || layer === 'doors') return 'door';
   if (kind === 'light' || layer === 'lighting') return 'light';
   if (kind === 'note' || layer === 'notes') return 'note';
   if (kind === 'fog' || layer === 'fog') return 'fog';

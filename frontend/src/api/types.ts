@@ -144,14 +144,26 @@ export interface OmnivitaCodeEvaluationResponse {
 }
 
 export type TabletopMode = 'build' | 'session';
-export type MapLayerKey = 'floor' | 'walls' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
+export type MapLayerKey = 'floor' | 'walls' | 'doors' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
 export type MapTool = 'select' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'token';
 export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
 export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
 export type EraseMode = 'activeLayer' | 'topVisible' | 'allUnlocked';
-export type AssetTypeCategory = 'floor' | 'wall' | 'door-window' | 'furniture' | 'prop' | 'detail' | 'light' | 'mechanic' | 'note' | 'fog';
-export type AssetTheme = 'cidade-baixo' | 'instituto' | 'laboratorio-canal' | 'zona-profunda' | 'urbano' | 'alienigena' | 'generico';
+export type AssetTypeCategory = 'floor' | 'wall' | 'door' | 'window' | 'door-window' | 'furniture' | 'prop' | 'detail' | 'light' | 'mechanic' | 'note' | 'fog';
+export type AssetTheme = 'cidade-baixo' | 'instituto' | 'laboratorio-canal' | 'zona-profunda' | 'urbano' | 'alienigena' | 'generico' | 'escola' | 'esgoto';
+export type TileLayerKey = 'floor' | 'walls' | 'doors' | 'collision';
+
+export interface GridFootprint {
+  w: number;
+  h: number;
+}
+
+export interface SelectedTileCell {
+  layer: TileLayerKey;
+  x: number;
+  y: number;
+}
 
 export interface AssetDefinition {
   id: string;
@@ -170,6 +182,8 @@ export interface AssetDefinition {
   defaultGivesCover: boolean;
   kind?: MapObjectKind | 'floor' | 'wall' | 'fog';
   defaultSnapMode?: SnapMode;
+  gridFootprint?: GridFootprint;
+  orientations?: number[];
   defaultOpacity?: number;
   defaultInteractable?: boolean;
   color?: string;
@@ -195,6 +209,7 @@ export interface TileCell {
   y: number;
   assetId: string;
   rotation?: number;
+  footprint?: GridFootprint;
 }
 
 export interface TileLayer {
@@ -309,7 +324,7 @@ export interface OmniMap {
   mode: TabletopMode;
   activeLayer: MapLayerKey;
   tilesets: Tileset[];
-  tileLayers: Record<'floor' | 'walls' | 'collision', TileLayer>;
+  tileLayers: Record<TileLayerKey, TileLayer>;
   objectLayer: ObjectLayer;
   decorationLayer: ObjectLayer;
   detailLayer: ObjectLayer;

@@ -16,6 +16,7 @@ export function ObjectInspector() {
   const map = useTabletopStore((state) => state.map);
   const selectedObjectId = useTabletopStore((state) => state.selectedObjectId);
   const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
+  const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
   const selectedTokenId = useTabletopStore((state) => state.selectedTokenId);
   const bringForward = useTabletopStore((state) => state.bringForward);
   const sendBackward = useTabletopStore((state) => state.sendBackward);
@@ -40,12 +41,13 @@ export function ObjectInspector() {
   const object = findObject(map, selectedObjectId);
   const token = map.tokens.find((entry) => entry.id === selectedTokenId) || null;
 
-  if (selectedObjectIds.length > 1) {
+  if (selectedObjectIds.length + selectedTileCells.length > 1 || (selectedTileCells.length && !object)) {
+    const totalSelected = selectedObjectIds.length + selectedTileCells.length;
     return (
       <section className="rounded-lg border border-line bg-panel/90 p-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-black uppercase text-violet">Inspetor</p>
-          <span className="rounded-lg border border-line bg-white/5 px-2 py-1 text-xs text-textMuted">{selectedObjectIds.length} selecionados</span>
+          <span className="rounded-lg border border-line bg-white/5 px-2 py-1 text-xs text-textMuted">{totalSelected} selecionados</span>
         </div>
         <div className="mt-3 grid gap-3">
           <label className="text-sm font-semibold text-textMuted">
@@ -65,7 +67,7 @@ export function ObjectInspector() {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <NumberInput label="Opacidade" value={1} step={0.05} min={0} max={1} onChange={(opacity) => updateSelectedObjects({ opacity })} />
-            <NumberInput label="Rotacao +" value={15} step={5} onChange={(rotation) => rotateSelectedObjects(rotation)} />
+            <NumberInput label="Rotacao +" value={45} step={45} onChange={(rotation) => rotateSelectedObjects(rotation)} />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" onClick={duplicateSelectedObjects}>Duplicar</Button>
@@ -78,8 +80,8 @@ export function ObjectInspector() {
             <Button type="button" onClick={() => alignSelectedObjects('center')}>Alinhar centro</Button>
             <Button type="button" onClick={() => distributeSelectedObjects('horizontal')}>Distribuir H</Button>
             <Button type="button" onClick={() => distributeSelectedObjects('vertical')}>Distribuir V</Button>
-            <Button type="button" onClick={() => rotateSelectedObjects(15)}>Girar +15</Button>
-            <Button type="button" onClick={() => rotateSelectedObjects(-15)}>Girar -15</Button>
+            <Button type="button" onClick={() => rotateSelectedObjects(45)}>Girar +45</Button>
+            <Button type="button" onClick={() => rotateSelectedObjects(-45)}>Girar -45</Button>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" onClick={placeOnSelectedParent}>Em cima do primeiro</Button>
@@ -151,7 +153,7 @@ export function ObjectInspector() {
             <NumberInput label="Y" value={object.y} step={0.25} onChange={(y) => updateObject(object.id, { y })} />
             <NumberInput label="Largura" value={object.width} step={4} min={4} onChange={(width) => updateObject(object.id, { width })} />
             <NumberInput label="Altura" value={object.height} step={4} min={4} onChange={(height) => updateObject(object.id, { height })} />
-            <NumberInput label="Rotacao" value={object.rotation} step={15} onChange={(rotation) => updateObject(object.id, { rotation })} />
+            <NumberInput label="Rotacao" value={object.rotation} step={45} onChange={(rotation) => updateObject(object.id, { rotation })} />
             <NumberInput label="zIndex" value={object.zIndex} step={1} min={0} onChange={(zIndex) => updateObject(object.id, { zIndex })} />
             <NumberInput label="Opacidade" value={object.opacity} step={0.05} min={0} max={1} onChange={(opacity) => updateObject(object.id, { opacity })} />
           </div>

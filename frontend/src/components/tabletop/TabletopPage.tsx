@@ -34,6 +34,9 @@ export function TabletopPage({
   const brushSize = useTabletopStore((state) => state.brushSize);
   const eraseMode = useTabletopStore((state) => state.eraseMode);
   const snapMode = useTabletopStore((state) => state.snapMode);
+  const placementRotation = useTabletopStore((state) => state.placementRotation);
+  const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
+  const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
   const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
   const [message, setMessage] = useState('');
   const [leftTab, setLeftTab] = useState<'map' | 'assets' | 'tools'>('assets');
@@ -167,6 +170,8 @@ export function TabletopPage({
             brushSize={brushSize}
             eraseMode={eraseMode}
             snapMode={snapMode}
+            rotation={placementRotation}
+            selectedCount={selectedObjectIds.length + selectedTileCells.length}
           />
         </div>
 
@@ -271,7 +276,9 @@ function StatusBar({
   assetType,
   brushSize,
   eraseMode,
-  snapMode
+  snapMode,
+  rotation,
+  selectedCount
 }: {
   tool: MapTool;
   layer: MapLayerKey;
@@ -280,12 +287,16 @@ function StatusBar({
   brushSize: number;
   eraseMode: EraseMode;
   snapMode: SnapMode;
+  rotation: number;
+  selectedCount: number;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel/90 px-3 py-2 text-sm text-textMuted">
       <StatusPill label="Ferramenta" value={tool} />
       <StatusPill label="Camada" value={layer} />
       <StatusPill label="Asset" value={`${assetName} (${assetType})`} />
+      <StatusPill label="Rotacao" value={`${rotation}°`} />
+      <StatusPill label="Selecao" value={String(selectedCount)} />
       <StatusPill label="Brush" value={`${brushSize}x${brushSize}`} />
       <StatusPill label="Apagar" value={eraseModeLabel(eraseMode)} />
       <StatusPill label="Snap" value={snapMode === 'fine' ? 'Fino' : snapMode === 'grid' ? 'Grid' : 'Livre'} />
@@ -311,11 +322,11 @@ function eraseModeLabel(mode: EraseMode) {
 function ShortcutPanel() {
   const lines = [
     'V selecionar, B piso, W parede, O objeto',
-    'L luz, N nota, F fog, C colisao, E apagar',
+    'D porta, L luz, N nota, F fog, C colisao, E apagar',
     'Delete remove, Ctrl+D duplica, Ctrl+Z desfaz',
-    'R gira +15, Shift+R gira -15, Q gira -5',
+    'R gira +45, Shift+R gira -45',
     'Setas movem 1px, Alt+setas 4px, Shift+setas 1 celula',
-    '[ e ] mudam brush, G alterna grid, Shift+L trava camada'
+    '[ e ] mudam brush, G alterna grid, Shift+L trava camada, Esc limpa selecao'
   ];
   return (
     <section className="rounded-lg border border-line bg-panel/90 p-3">

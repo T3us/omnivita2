@@ -18,13 +18,14 @@ const DEFAULT_HEIGHT = 18;
 const DEFAULT_GRID = 32;
 const LAYER_ORDER: Partial<Record<MapLayerKey, number>> = {
   floor: 10,
+  collision: 15,
   walls: 20,
+  doors: 25,
   decoration: 30,
   objects: 40,
   details: 50,
   lighting: 60,
   mechanics: 70,
-  collision: 80,
   fog: 90,
   notes: 100,
   tokens: 110
@@ -43,7 +44,7 @@ function createTileLayer(key: TileLayerKey, name: string): TileLayer {
     locked: false,
     opacity: key === 'collision' ? 0.32 : 1,
     order: LAYER_ORDER[key] || 0,
-    selectable: false,
+    selectable: true,
     editable: true,
     cells: []
   };
@@ -91,6 +92,7 @@ export function createBlankMap(name = 'Novo mapa', width = DEFAULT_WIDTH, height
     tileLayers: {
       floor: createTileLayer('floor', 'Piso'),
       walls: createTileLayer('walls', 'Paredes'),
+      doors: createTileLayer('doors', 'Portas'),
       collision: createTileLayer('collision', 'Colisao')
     },
     objectLayer: createObjectLayer('objects', 'Objetos'),
@@ -121,6 +123,7 @@ export function normalizeMap(input: Partial<OmniMap> | null | undefined): OmniMa
     tileLayers: {
       floor: normalizeTileLayer(input?.tileLayers?.floor, base.tileLayers.floor),
       walls: normalizeTileLayer(input?.tileLayers?.walls, base.tileLayers.walls),
+      doors: normalizeTileLayer(input?.tileLayers?.doors, base.tileLayers.doors),
       collision: normalizeTileLayer(input?.tileLayers?.collision, base.tileLayers.collision)
     },
     objectLayer: normalizeObjectLayer(input?.objectLayer, base.objectLayer),
@@ -141,10 +144,10 @@ export function cloneMap(map: OmniMap): OmniMap {
   return normalizeMap(JSON.parse(JSON.stringify(map)) as OmniMap);
 }
 
-export function setTileCell(cells: TileCell[], x: number, y: number, assetId: string) {
+export function setTileCell(cells: TileCell[], x: number, y: number, assetId: string, rotation = 0, footprint?: TileCell['footprint']) {
   const key = `${x}:${y}`;
   const next = cells.filter((cell) => `${cell.x}:${cell.y}` !== key);
-  if (assetId) next.push({ x, y, assetId });
+  if (assetId) next.push({ x, y, assetId, rotation: normalizeRotation(rotation), footprint });
   return next;
 }
 
@@ -302,7 +305,8 @@ function normalizeTileCell(cell: Partial<TileCell>) {
     x: clampInteger(cell.x, 0, 999),
     y: clampInteger(cell.y, 0, 999),
     assetId: String(cell.assetId),
-    rotation: Number(cell.rotation || 0)
+    rotation: normalizeRotation(Number(cell.rotation || 0)),
+    footprint: cell.footprint ? { w: clampInteger(cell.footprint.w, 1, 10), h: clampInteger(cell.footprint.h, 1, 10) } : undefined
   };
 }
 
@@ -328,7 +332,7 @@ function normalizeObject(object: Partial<MapObject>) {
     y: legacyLooksLikeGrid ? Number(object.y || 0) * DEFAULT_GRID : Number(object.y || 0),
     width: legacyLooksLikeGrid ? width * DEFAULT_GRID : width,
     height: legacyLooksLikeGrid ? clampNumber(object.height, 4, 4000, 64) * DEFAULT_GRID : clampNumber(object.height, 4, 4000, 64),
-    rotation: Number(object.rotation || 0),
+    rotation: normalizeRotation(Number(object.rotation || 0)),
     scale: clampNumber(object.scale, 0.1, 8, 1),
     zIndex: Number(object.zIndex || 0),
     opacity: clampNumber(object.opacity, 0, 1, 1),
@@ -387,7 +391,7 @@ function normalizeMode(value: unknown): TabletopMode {
 }
 
 function normalizeLayer(value: unknown): MapLayerKey {
-  const valid: MapLayerKey[] = ['floor', 'walls', 'objects', 'decoration', 'details', 'lighting', 'mechanics', 'collision', 'fog', 'notes', 'tokens'];
+  const valid: MapLayerKey[] = ['floor', 'walls', 'doors', 'objects', 'decoration', 'details', 'lighting', 'mechanics', 'collision', 'fog', 'notes', 'tokens'];
   return valid.includes(value as MapLayerKey) ? value as MapLayerKey : 'floor';
 }
 
@@ -405,4 +409,10 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.max(min, Math.min(max, number));
+}
+
+function normalizeRotation(value: number) {
+  const snapped = Math.round(value / 45) * 45;
+  const normalized = snapped % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
 }

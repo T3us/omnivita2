@@ -56,6 +56,7 @@ export function MapToolbar({
   const zoom = useTabletopStore((state) => state.zoom);
   const snapMode = useTabletopStore((state) => state.snapMode);
   const eraseMode = useTabletopStore((state) => state.eraseMode);
+  const placementRotation = useTabletopStore((state) => state.placementRotation);
   const brushSize = useTabletopStore((state) => state.brushSize);
   const showGrid = useTabletopStore((state) => state.showGrid);
   const canUndo = useTabletopStore((state) => state.historyPast.length > 0);
@@ -74,8 +75,11 @@ export function MapToolbar({
   const duplicateSelectedObjects = useTabletopStore((state) => state.duplicateSelectedObjects);
   const removeSelectedObjects = useTabletopStore((state) => state.removeSelectedObjects);
   const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
+  const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
   const nudgeSelectedObjects = useTabletopStore((state) => state.nudgeSelectedObjects);
   const rotateSelectedObjects = useTabletopStore((state) => state.rotateSelectedObjects);
+  const rotatePlacement = useTabletopStore((state) => state.rotatePlacement);
+  const clearObjectSelection = useTabletopStore((state) => state.clearObjectSelection);
   const groupSelectedObjects = useTabletopStore((state) => state.groupSelectedObjects);
   const ungroupSelectedObjects = useTabletopStore((state) => state.ungroupSelectedObjects);
   const tools = map.mode === 'build' ? buildTools : sessionTools;
@@ -106,12 +110,18 @@ export function MapToolbar({
         else groupSelectedObjects();
         return;
       }
+      const hasSelection = selectedObjectIds.length > 0 || selectedTileCells.length > 0;
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
         removeSelectedObjects();
         return;
       }
-      if (event.key.startsWith('Arrow') && selectedObjectIds.length) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        clearObjectSelection();
+        return;
+      }
+      if (event.key.startsWith('Arrow') && hasSelection) {
         event.preventDefault();
         const gridStep = map.gridSize;
         const step = event.shiftKey ? gridStep : event.altKey ? 4 : 1;
@@ -119,25 +129,17 @@ export function MapToolbar({
         nudgeSelectedObjects(direction.x, direction.y);
         return;
       }
-      if (key === 'r' && selectedObjectIds.length) {
+      if (key === 'r') {
         event.preventDefault();
-        rotateSelectedObjects(event.shiftKey ? -15 : 15);
-        return;
-      }
-      if (key === 'q' && selectedObjectIds.length) {
-        event.preventDefault();
-        rotateSelectedObjects(-5);
-        return;
-      }
-      if (key === 'e' && tool === 'select' && selectedObjectIds.length) {
-        event.preventDefault();
-        rotateSelectedObjects(5);
+        if (hasSelection) rotateSelectedObjects(event.shiftKey ? -45 : 45);
+        else rotatePlacement(event.shiftKey ? -45 : 45);
         return;
       }
       const toolByKey: Partial<Record<string, MapTool>> = {
         v: 'select',
         b: 'brush',
         w: 'wall',
+        d: 'door',
         e: 'erase',
         f: 'fog',
         c: 'collision',
@@ -170,7 +172,7 @@ export function MapToolbar({
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [brushSize, duplicateSelectedObjects, groupSelectedObjects, map.gridSize, nudgeSelectedObjects, redo, removeSelectedObjects, rotateSelectedObjects, selectedObjectIds.length, setBrushSize, setTool, toggleActiveLayerLock, toggleGrid, tool, undo, ungroupSelectedObjects]);
+  }, [brushSize, clearObjectSelection, duplicateSelectedObjects, groupSelectedObjects, map.gridSize, nudgeSelectedObjects, redo, removeSelectedObjects, rotatePlacement, rotateSelectedObjects, selectedObjectIds.length, selectedTileCells.length, setBrushSize, setTool, toggleActiveLayerLock, toggleGrid, tool, undo, ungroupSelectedObjects]);
 
   return (
     <section className="rounded-lg border border-line bg-panel/90 p-3">
@@ -247,6 +249,14 @@ export function MapToolbar({
             onClick={toggleGrid}
           >
             Grid
+          </button>
+          <button
+            type="button"
+            className="min-h-8 rounded-lg border border-line bg-white/5 px-2 text-xs font-bold text-textMuted hover:bg-white/10"
+            onClick={() => rotatePlacement(45)}
+            title="Girar preview/asset antes de colocar"
+          >
+            Rot {placementRotation}°
           </button>
           <div className="flex items-center gap-1">
             {snapModes.map((entry) => (

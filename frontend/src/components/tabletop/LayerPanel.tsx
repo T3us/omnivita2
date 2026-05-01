@@ -12,6 +12,7 @@ const layers: Array<{ id: MapLayerKey; label: string; icon: string }> = [
   { id: 'details', label: 'Detalhes', icon: 'D' },
   { id: 'objects', label: 'Objetos', icon: 'O' },
   { id: 'decoration', label: 'Decoracao', icon: 'A' },
+  { id: 'doors', label: 'Portas', icon: 'D' },
   { id: 'walls', label: 'Paredes', icon: 'W' },
   { id: 'floor', label: 'Piso', icon: 'P' }
 ];
@@ -153,7 +154,7 @@ export function LayerPanel() {
 }
 
 function getLayerState(map: ReturnType<typeof useTabletopStore.getState>['map'], layer: MapLayerKey) {
-  if (layer === 'floor' || layer === 'walls' || layer === 'collision') return map.tileLayers[layer];
+  if (layer === 'floor' || layer === 'walls' || layer === 'doors' || layer === 'collision') return map.tileLayers[layer];
   if (layer === 'objects') return map.objectLayer;
   if (layer === 'decoration') return map.decorationLayer;
   if (layer === 'details') return map.detailLayer;
@@ -165,7 +166,7 @@ function getLayerState(map: ReturnType<typeof useTabletopStore.getState>['map'],
 }
 
 function getLayerCount(map: ReturnType<typeof useTabletopStore.getState>['map'], layer: MapLayerKey) {
-  if (layer === 'floor' || layer === 'walls' || layer === 'collision') return map.tileLayers[layer].cells.length;
+  if (layer === 'floor' || layer === 'walls' || layer === 'doors' || layer === 'collision') return map.tileLayers[layer].cells.length;
   if (layer === 'objects') return map.objectLayer.objects.length;
   if (layer === 'decoration') return map.decorationLayer.objects.length;
   if (layer === 'details') return map.detailLayer.objects.length;

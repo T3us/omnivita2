@@ -5,7 +5,7 @@ import type { DragEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { getAsset } from './assets';
 import { useTabletopStore } from './mapStore';
-import type { MapLayerKey, MapObject, MapTool, ObjectLayer, OmniMap, SnapMode, TabletopToken, TileLayer } from './types';
+import type { MapLayerKey, MapObject, MapTool, ObjectLayer, OmniMap, SelectedTileCell, SnapMode, TabletopToken, TileLayer } from './types';
 
 const GRID_LINE = 'rgba(196,181,253,0.13)';
 
@@ -15,7 +15,9 @@ export function MapStage() {
   const zoom = useTabletopStore((state) => state.zoom);
   const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
   const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
+  const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
   const selectedTokenId = useTabletopStore((state) => state.selectedTokenId);
+  const placementRotation = useTabletopStore((state) => state.placementRotation);
   const brushSize = useTabletopStore((state) => state.brushSize);
   const showGrid = useTabletopStore((state) => state.showGrid);
   const isTransforming = useTabletopStore((state) => state.isTransforming);
@@ -24,9 +26,10 @@ export function MapStage() {
   const eraseBrush = useTabletopStore((state) => state.eraseBrush);
   const eraseBrushAtPoint = useTabletopStore((state) => state.eraseBrushAtPoint);
   const addObject = useTabletopStore((state) => state.addObject);
+  const addDoor = useTabletopStore((state) => state.addDoor);
   const updateObject = useTabletopStore((state) => state.updateObject);
   const selectObject = useTabletopStore((state) => state.selectObject);
-  const selectObjectsInRect = useTabletopStore((state) => state.selectObjectsInRect);
+  const selectArea = useTabletopStore((state) => state.selectArea);
   const clearObjectSelection = useTabletopStore((state) => state.clearObjectSelection);
   const moveSelectedObjects = useTabletopStore((state) => state.moveSelectedObjects);
   const moveToken = useTabletopStore((state) => state.moveToken);
@@ -62,6 +65,11 @@ export function MapStage() {
         selectionStartRef.current = pointer;
         setSelectionBox({ x: pointer.x, y: pointer.y, width: 0, height: 0 });
       }
+      return;
+    }
+
+    if (tool === 'door' && cell) {
+      addDoor(cell.x, cell.y, selectedAssetId, placementRotation);
       return;
     }
 
@@ -109,7 +117,7 @@ export function MapStage() {
     if (tool === 'select' && selectionStartRef.current && selectionBox) {
       const isTiny = Math.abs(selectionBox.width) < 4 && Math.abs(selectionBox.height) < 4;
       if (!isTiny) {
-        selectObjectsInRect(selectionBox, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
+        selectArea(selectionBox, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
       }
     }
     selectionStartRef.current = null;
@@ -154,6 +162,10 @@ export function MapStage() {
       paintBrush(cell.x, cell.y, asset.defaultLayer, assetId, brushSize);
       return;
     }
+    if (asset?.defaultLayer === 'doors' && cell) {
+      addDoor(cell.x, cell.y, assetId, placementRotation);
+      return;
+    }
     addObject(assetId, x, y, undefined);
   }
 
@@ -181,6 +193,7 @@ export function MapStage() {
           <MapBackground map={map} />
           {isLayerVisible('floor', soloLayer) ? <TileLayerView layer={map.tileLayers.floor} map={map} /> : null}
           {isLayerVisible('walls', soloLayer) ? <TileLayerView layer={map.tileLayers.walls} map={map} wall /> : null}
+          {isLayerVisible('doors', soloLayer) ? <TileLayerView layer={map.tileLayers.doors} map={map} door /> : null}
           {isLayerVisible('decoration', soloLayer) ? <ObjectLayerView layer={map.decorationLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
           {isLayerVisible('objects', soloLayer) ? <ObjectLayerView layer={map.objectLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
           {isLayerVisible('details', soloLayer) ? <ObjectLayerView layer={map.detailLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} onSelect={selectObject} onUpdate={updateObject} onMoveSelected={moveSelectedObjects} setTransforming={setTransforming} /> : null}
@@ -198,8 +211,10 @@ export function MapStage() {
             />
           ) : null}
           {showGrid ? <Grid map={map} /> : null}
+          <SelectedTileOverlay map={map} selectedTileCells={selectedTileCells} />
+          <SelectedGroupBounds map={map} selectedObjectIds={selectedObjectIds} selectedTileCells={selectedTileCells} />
           <BrushPreview map={map} tool={tool} cell={hoverCell} brushSize={brushSize} />
-          <PlacementPreview map={map} tool={tool} point={hoverPoint} assetId={selectedAssetId} />
+          <PlacementPreview map={map} tool={tool} point={hoverPoint} cell={hoverCell} assetId={selectedAssetId} rotation={placementRotation} />
           {selectionBox ? <SelectionBox box={selectionBox} /> : null}
         </Layer>
       </Stage>
@@ -219,7 +234,7 @@ function MapBackground({ map }: { map: OmniMap }) {
   );
 }
 
-function TileLayerView({ layer, map, wall = false, collision = false }: { layer: TileLayer; map: OmniMap; wall?: boolean; collision?: boolean }) {
+function TileLayerView({ layer, map, wall = false, door = false, collision = false }: { layer: TileLayer; map: OmniMap; wall?: boolean; door?: boolean; collision?: boolean }) {
   if (!layer.visible) return null;
   return (
     <>
@@ -233,9 +248,11 @@ function TileLayerView({ layer, map, wall = false, collision = false }: { layer:
             x={cell.x * size}
             y={cell.y * size}
             size={size}
+            footprint={cell.footprint || asset?.gridFootprint}
+            rotation={cell.rotation || 0}
             fill={collision ? 'rgba(251,113,133,0.22)' : asset?.color || '#2a2035'}
-            stroke={wall || collision ? asset?.stroke || '#a78bfa' : asset?.stroke || 'rgba(255,255,255,0.08)'}
-            strokeWidth={wall ? 2 : 1}
+            stroke={wall || door || collision ? asset?.stroke || '#a78bfa' : asset?.stroke || 'rgba(255,255,255,0.08)'}
+            strokeWidth={wall || door ? 2 : 1}
             opacity={layer.opacity}
           />
         );
@@ -376,7 +393,7 @@ function MapObjectShape({
             y: node.y(),
             width: Math.max(4, width * scaleX),
             height: Math.max(4, height * scaleY),
-            rotation: node.rotation(),
+            rotation: normalizeRotation45(node.rotation()),
             scale: 1
           });
           setTransforming(false);
@@ -418,6 +435,8 @@ function MapObjectShape({
           anchorFill="#12091f"
           borderStroke="#c4b5fd"
           borderDash={[4, 4]}
+          rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
+          rotationSnapTolerance={18}
           boundBoxFunc={(oldBox, newBox) => {
             if (newBox.width < 8 || newBox.height < 8) return oldBox;
             return newBox;
@@ -433,6 +452,8 @@ function TileCellView({
   x,
   y,
   size,
+  footprint,
+  rotation,
   fill,
   stroke,
   strokeWidth,
@@ -442,20 +463,33 @@ function TileCellView({
   x: number;
   y: number;
   size: number;
+  footprint?: { w: number; h: number };
+  rotation: number;
   fill: string;
   stroke: string;
   strokeWidth: number;
   opacity: number;
 }) {
   const image = useAssetImage(assetImage);
+  const baseFootprint = footprint || { w: 1, h: 1 };
+  const renderedFootprint = resolveFootprint(baseFootprint, rotation);
+  const width = renderedFootprint.w * size;
+  const height = renderedFootprint.h * size;
+  const imageWidth = baseFootprint.w * size;
+  const imageHeight = baseFootprint.h * size;
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const normalizedRotation = normalizeRotation45(rotation);
   return (
     <>
-      {image ? (
-        <KonvaImage image={image} x={x} y={y} width={size} height={size} opacity={opacity} />
-      ) : (
-        <Rect x={x} y={y} width={size} height={size} fill={fill} opacity={opacity} />
-      )}
-      <Rect x={x} y={y} width={size} height={size} stroke={stroke} strokeWidth={strokeWidth} opacity={opacity * 0.8} listening={false} />
+      <Group x={centerX} y={centerY} rotation={normalizedRotation} listening={false}>
+        {image ? (
+          <KonvaImage image={image} x={-imageWidth / 2} y={-imageHeight / 2} width={imageWidth} height={imageHeight} opacity={opacity} />
+        ) : (
+          <Rect x={-imageWidth / 2} y={-imageHeight / 2} width={imageWidth} height={imageHeight} fill={fill} opacity={opacity} />
+        )}
+      </Group>
+      <Rect x={x} y={y} width={width} height={height} stroke={stroke} strokeWidth={strokeWidth} opacity={opacity * 0.8} listening={false} />
     </>
   );
 }
@@ -497,22 +531,47 @@ function PlacementPreview({
   map,
   tool,
   point,
-  assetId
+  cell,
+  assetId,
+  rotation
 }: {
   map: OmniMap;
   tool: MapTool;
   point: { x: number; y: number } | null;
+  cell: { x: number; y: number } | null;
   assetId: string;
+  rotation: number;
 }) {
-  const asset = getAsset(assetId, map.tilesets);
+  const selectedAsset = getAsset(assetId, map.tilesets);
+  const asset = tool === 'door' && selectedAsset?.kind !== 'door' && selectedAsset?.defaultLayer !== 'doors'
+    ? getAsset('door-metal', map.tilesets)
+    : selectedAsset;
   const image = useAssetImage(asset?.imageUrl);
-  if (!point || !asset || !isPlaceTool(tool)) return null;
+  if (!point || !asset || (!isPlaceTool(tool) && tool !== 'door')) return null;
+  if (tool === 'door') {
+    if (!cell) return null;
+    const footprint = resolveFootprint(asset.gridFootprint || { w: 1, h: 1 }, rotation);
+    return (
+      <Rect
+        x={cell.x * map.gridSize}
+        y={cell.y * map.gridSize}
+        width={footprint.w * map.gridSize}
+        height={footprint.h * map.gridSize}
+        fill={asset.color || '#8b5cf6'}
+        opacity={0.22}
+        stroke="#f5f3ff"
+        strokeWidth={2}
+        dash={[5, 4]}
+        listening={false}
+      />
+    );
+  }
   const width = asset.defaultWidth || 64;
   const height = asset.defaultHeight || 64;
   if (image) {
-    return <KonvaImage image={image} x={point.x} y={point.y} width={width} height={height} opacity={0.42} listening={false} />;
+    return <KonvaImage image={image} x={point.x} y={point.y} width={width} height={height} rotation={normalizeRotation45(rotation)} opacity={0.42} listening={false} />;
   }
-  return <Rect x={point.x} y={point.y} width={width} height={height} fill={asset.color || '#8b5cf6'} opacity={0.28} stroke="#f5f3ff" dash={[4, 4]} listening={false} />;
+  return <Rect x={point.x} y={point.y} width={width} height={height} rotation={normalizeRotation45(rotation)} fill={asset.color || '#8b5cf6'} opacity={0.28} stroke="#f5f3ff" dash={[4, 4]} listening={false} />;
 }
 
 function SelectionBox({ box }: { box: { x: number; y: number; width: number; height: number } }) {
@@ -532,6 +591,54 @@ function SelectionBox({ box }: { box: { x: number; y: number; width: number; hei
       listening={false}
     />
   );
+}
+
+function SelectedTileOverlay({ map, selectedTileCells }: { map: OmniMap; selectedTileCells: SelectedTileCell[] }) {
+  if (!selectedTileCells.length) return null;
+  return (
+    <>
+      {selectedTileCells.map((cell) => {
+        const tile = map.tileLayers[cell.layer]?.cells.find((entry) => entry.x === cell.x && entry.y === cell.y);
+        const footprint = resolveFootprint(tile?.footprint, tile?.rotation || 0);
+        return (
+          <Rect
+            key={`${cell.layer}-${cell.x}-${cell.y}`}
+            x={cell.x * map.gridSize}
+            y={cell.y * map.gridSize}
+            width={footprint.w * map.gridSize}
+            height={footprint.h * map.gridSize}
+            fill="#8b5cf6"
+            opacity={0.14}
+            stroke="#ddd6fe"
+            strokeWidth={2}
+            dash={[4, 4]}
+            listening={false}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function SelectedGroupBounds({ map, selectedObjectIds, selectedTileCells }: { map: OmniMap; selectedObjectIds: string[]; selectedTileCells: SelectedTileCell[] }) {
+  const boxes: Array<{ x: number; y: number; width: number; height: number }> = [];
+  if (selectedObjectIds.length + selectedTileCells.length < 2) return null;
+  const selected = new Set(selectedObjectIds);
+  getAllObjects(map).forEach((object) => {
+    if (!selected.has(object.id)) return;
+    boxes.push({ x: object.x, y: object.y, width: object.width * (object.scale || 1), height: object.height * (object.scale || 1) });
+  });
+  selectedTileCells.forEach((cell) => {
+    const tile = map.tileLayers[cell.layer]?.cells.find((entry) => entry.x === cell.x && entry.y === cell.y);
+    const footprint = resolveFootprint(tile?.footprint, tile?.rotation || 0);
+    boxes.push({ x: cell.x * map.gridSize, y: cell.y * map.gridSize, width: footprint.w * map.gridSize, height: footprint.h * map.gridSize });
+  });
+  if (!boxes.length) return null;
+  const minX = Math.min(...boxes.map((box) => box.x));
+  const minY = Math.min(...boxes.map((box) => box.y));
+  const maxX = Math.max(...boxes.map((box) => box.x + box.width));
+  const maxY = Math.max(...boxes.map((box) => box.y + box.height));
+  return <Rect x={minX - 4} y={minY - 4} width={maxX - minX + 8} height={maxY - minY + 8} stroke="#c4b5fd" strokeWidth={1} dash={[8, 5]} listening={false} />;
 }
 
 function FogView({ map }: { map: OmniMap }) {
@@ -701,7 +808,7 @@ function isGridTool(tool: MapTool) {
 }
 
 function isPlaceTool(tool: MapTool) {
-  return tool === 'object' || tool === 'door' || tool === 'cover' || tool === 'terminal' || tool === 'light' || tool === 'zone' || tool === 'note';
+  return tool === 'object' || tool === 'cover' || tool === 'terminal' || tool === 'light' || tool === 'zone' || tool === 'note';
 }
 
 function isLayerVisible(layer: MapLayerKey, soloLayer: MapLayerKey | null) {
@@ -771,4 +878,21 @@ function hasNamedAncestor(node: Konva.Node, name: string) {
     current = current.getParent();
   }
   return false;
+}
+
+function normalizeRotation45(value: number) {
+  const snapped = Math.round(value / 45) * 45;
+  const normalized = snapped % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function resolveFootprint(footprint: { w: number; h: number } | undefined, rotation = 0) {
+  const base = footprint || { w: 1, h: 1 };
+  const normalized = normalizeRotation45(rotation);
+  return normalized === 90 || normalized === 270 ? { w: base.h, h: base.w } : base;
+}
+
+function getAllObjects(map: OmniMap) {
+  return [map.decorationLayer, map.objectLayer, map.detailLayer, map.lightingLayer, map.mechanicalLayer, map.notesLayer]
+    .flatMap((layer) => layer.objects);
 }

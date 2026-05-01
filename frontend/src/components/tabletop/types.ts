@@ -15,12 +15,14 @@ import type {
   MapTool,
   ObjectLayer,
   OmniMap,
+  SelectedTileCell,
   SnapMode,
   TabletopMode,
   TabletopToken,
   TabletopTokenKind,
   TileCell,
   TileLayer,
+  TileLayerKey,
   Tileset
 } from '../../api/types';
 
@@ -41,16 +43,17 @@ export type {
   MapTool,
   ObjectLayer,
   OmniMap,
+  SelectedTileCell,
   SnapMode,
   TabletopMode,
   TabletopToken,
   TabletopTokenKind,
   TileCell,
   TileLayer,
+  TileLayerKey,
   Tileset
 };
 
-export type TileLayerKey = 'floor' | 'walls' | 'collision';
 export type ObjectLayerKey = 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'notes';
 
 export interface AvailableTabletopToken {
