@@ -40,9 +40,6 @@
     const method = options.method || 'GET';
     const headers = { ...(options.headers || {}) };
     const baseUrl = getBaseUrl();
-    if (!baseUrl) {
-      throw new Error('API nao configurada. Rode start-omnivita-local.bat ou start-omnivita-radmin.bat para atualizar a URL.');
-    }
     const url = `${baseUrl}${path}`;
     const token = options.auth === false ? '' : getAccessToken();
 
@@ -75,7 +72,12 @@
         normalized.includes('econnreset')
         || normalized.includes('econnrefused')
         || normalized.includes('failed to fetch')
-        || normalized.includes('db_unavailable')
+      ) {
+        return 'Nao consegui falar com a API local. Confira se o start do OmniVita esta rodando.';
+      }
+
+      if (
+        normalized.includes('db_unavailable')
         || normalized.includes('banco de dados indisponivel')
       ) {
         return 'O backend esta online, mas o banco de dados nao respondeu. Verifique se o PostgreSQL local esta aberto e tente de novo.';
@@ -212,9 +214,9 @@
     if (socket || !window.io) return socket;
     const baseUrl = getBaseUrl();
     const token = getAccessToken();
-    if (!baseUrl || !token) return null;
+    if (!token) return null;
 
-    socket = window.io(baseUrl, {
+    socket = window.io(baseUrl || undefined, {
       transports: ['websocket', 'polling'],
       auth: { token }
     });

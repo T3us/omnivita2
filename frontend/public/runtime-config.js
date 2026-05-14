@@ -1,3 +1,3 @@
 window.OMNIVITA_RUNTIME_CONFIG = window.OMNIVITA_RUNTIME_CONFIG || {
-  apiBaseUrl: 'http://localhost:3001'
+  apiBaseUrl: ''
 };

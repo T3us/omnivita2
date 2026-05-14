@@ -9,9 +9,9 @@ export function getSocket(): Socket | null {
   if (socket) return socket;
   const baseUrl = getRuntimeApiBaseUrl();
   const token = getAccessToken();
-  if (!baseUrl || !token) return null;
+  if (!token) return null;
 
-  socket = io(baseUrl, {
+  socket = io(baseUrl || undefined, {
     transports: ['websocket', 'polling'],
     auth: { token }
   });

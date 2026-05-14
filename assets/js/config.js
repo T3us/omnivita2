@@ -1,8 +1,5 @@
 (function () {
   const runtime = window.OMNIVITA_RUNTIME_CONFIG || {};
-  const hostname = String(window.location.hostname || '').trim().toLowerCase();
-  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-  const defaultLocalApiBaseUrl = 'http://localhost:3001';
   const runtimeApiBaseUrl = String(runtime.apiBaseUrl || '').trim();
 
   window.APP_CONFIG = {
@@ -11,8 +8,8 @@
     legacyStorageKey: 'omnivita_campaign_data_v2',
     sessionKey: 'omnivita_api_session_v1',
     legacySessionKey: 'omnivita_session_v2',
-    apiBaseUrl: isLocalhost ? defaultLocalApiBaseUrl : runtimeApiBaseUrl,
-    defaultLocalApiBaseUrl,
+    apiBaseUrl: runtimeApiBaseUrl,
+    defaultLocalApiBaseUrl: '',
     runtimeApiBaseUrl
   };
 })();

@@ -26,7 +26,11 @@ function friendlyError(message: string, status = 0): string {
   if (
     normalized.includes('failed to fetch') ||
     normalized.includes('econnreset') ||
-    normalized.includes('econnrefused') ||
+    normalized.includes('econnrefused')
+  ) {
+    return 'Nao consegui falar com a API local. Confira se o start do OmniVita esta rodando.';
+  }
+  if (
     normalized.includes('banco de dados indisponivel') ||
     normalized.includes('db_unavailable')
   ) {
@@ -42,9 +46,6 @@ export function getAccessToken(): string {
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const baseUrl = getRuntimeApiBaseUrl();
-  if (!baseUrl) {
-    throw new Error('API nao configurada. Rode o start local ou Radmin para atualizar a URL.');
-  }
 
   const headers: Record<string, string> = {};
   const token = options.auth === false ? '' : getAccessToken();

@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +18,10 @@ function getArg(name, fallback) {
 const host = getArg('host', process.env.OMNIVITA_SITE_HOST || '0.0.0.0');
 const port = Number(getArg('port', process.env.OMNIVITA_SITE_PORT || '5500'));
 const requestedRoot = getArg('root', process.env.OMNIVITA_DIST_ROOT || '');
+const apiProxyTarget = new URL(getArg(
+  'api-target',
+  process.env.OMNIVITA_API_PROXY_TARGET || process.env.OMNIVITA_API_URL || 'http://127.0.0.1:3001'
+));
 const distRoot = requestedRoot
   ? path.resolve(repoRoot, requestedRoot)
   : path.join(repoRoot, 'frontend', 'dist');
@@ -41,6 +47,48 @@ function send(response, statusCode, body, headers = {}) {
   response.end(body);
 }
 
+function shouldProxy(url) {
+  const parsedUrl = new URL(url || '/', 'http://localhost');
+  return parsedUrl.pathname.startsWith('/api')
+    || parsedUrl.pathname === '/health'
+    || parsedUrl.pathname.startsWith('/socket.io');
+}
+
+function proxyHttp(request, response) {
+  const targetUrl = new URL(request.url || '/', apiProxyTarget);
+  const transport = targetUrl.protocol === 'https:' ? https : http;
+
+  const proxyRequest = transport.request({
+    protocol: targetUrl.protocol,
+    hostname: targetUrl.hostname,
+    port: targetUrl.port,
+    method: request.method,
+    path: `${targetUrl.pathname}${targetUrl.search}`,
+    headers: {
+      ...request.headers,
+      host: targetUrl.host
+    }
+  }, (proxyResponse) => {
+    response.writeHead(proxyResponse.statusCode || 502, proxyResponse.headers);
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
+    proxyResponse.pipe(response);
+  });
+
+  proxyRequest.on('error', (error) => {
+    console.error(error);
+    if (!response.headersSent) {
+      send(response, 502, 'API local indisponivel.');
+      return;
+    }
+    response.end();
+  });
+
+  request.pipe(proxyRequest);
+}
+
 function resolveRequestedPath(url) {
   const parsedUrl = new URL(url, 'http://localhost');
   const pathname = decodeURIComponent(parsedUrl.pathname || '/');
@@ -55,6 +103,11 @@ function resolveRequestedPath(url) {
 }
 
 const server = http.createServer(async (request, response) => {
+  if (shouldProxy(request.url)) {
+    proxyHttp(request, response);
+    return;
+  }
+
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     send(response, 405, 'Metodo nao permitido.', { Allow: 'GET, HEAD' });
     return;
@@ -106,6 +159,35 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+server.on('upgrade', (request, socket, head) => {
+  if (!shouldProxy(request.url) || apiProxyTarget.protocol !== 'http:') {
+    socket.destroy();
+    return;
+  }
+
+  const targetUrl = new URL(request.url || '/', apiProxyTarget);
+  const proxySocket = net.connect(Number(targetUrl.port || 80), targetUrl.hostname, () => {
+    const headers = {
+      ...request.headers,
+      host: targetUrl.host
+    };
+    const headerLines = [
+      `${request.method} ${targetUrl.pathname}${targetUrl.search} HTTP/${request.httpVersion}`,
+      ...Object.entries(headers).map(([name, value]) => `${name}: ${Array.isArray(value) ? value.join(', ') : value}`)
+    ];
+
+    proxySocket.write(`${headerLines.join('\r\n')}\r\n\r\n`);
+    if (head.length) proxySocket.write(head);
+    proxySocket.pipe(socket);
+    socket.pipe(proxySocket);
+  });
+
+  proxySocket.on('error', () => {
+    socket.destroy();
+  });
+});
+
 server.listen(port, host, () => {
   console.log(`OmniVita site local em http://${host}:${port}`);
+  console.log(`Proxy da API em ${apiProxyTarget.origin}`);
 });

@@ -44,7 +44,8 @@ async function copyIfExists(source, destination) {
   }
 }
 
-await run('cmd.exe', ['/d', '/s', '/c', 'npm.cmd --prefix frontend run build'], { cwd: repoRoot });
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+await run(npmCommand, ['--prefix', 'frontend', 'run', 'build'], { cwd: repoRoot });
 
 await fs.rm(legacyDist, { recursive: true, force: true });
 await fs.mkdir(legacyDist, { recursive: true });

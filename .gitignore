@@ -7,7 +7,10 @@ frontend/coverage/
 .vite/
 
 .env
+frontend/.env
+frontend/.env.local
 backend/.env
+backend/.env.local
 
 *.log
 *.err.log

@@ -28,6 +28,23 @@ function parseHost(value) {
   return host;
 }
 
+function isWildcardOriginMatch(origin, allowedOrigin) {
+  const allowed = String(allowedOrigin || '').trim();
+  if (!allowed.includes('*')) return false;
+
+  try {
+    const originUrl = new URL(origin);
+    const allowedUrl = new URL(allowed.replace('*.', 'wildcard.'));
+    const suffix = allowedUrl.hostname.replace(/^wildcard\./, '');
+
+    return originUrl.protocol === allowedUrl.protocol
+      && originUrl.hostname.endsWith(`.${suffix}`)
+      && (!allowedUrl.port || originUrl.port === allowedUrl.port);
+  } catch {
+    return false;
+  }
+}
+
 export const config = {
   host: parseHost(process.env.HOST),
   port: toNumber(process.env.PORT, 3001),
@@ -46,5 +63,7 @@ export function isOriginAllowed(origin) {
   if (origin === 'null') return true;
   if (!config.corsOrigins.length) return true;
   if (config.corsOrigins.includes('*')) return true;
-  return config.corsOrigins.includes(origin);
+  if (config.corsOrigins.includes(origin)) return true;
+  if (config.corsOrigins.some((allowed) => isWildcardOriginMatch(origin, allowed))) return true;
+  return false;
 }
