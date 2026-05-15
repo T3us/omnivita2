@@ -6,14 +6,14 @@ import type { MapTool } from '../types';
 
 const sessionTools: Array<{ id: MapTool; label: string; hint: string }> = [
   { id: 'select', label: 'Selecionar', hint: 'V' },
+  { id: 'pan', label: 'Pan', hint: 'H / Space' },
   { id: 'token', label: 'Criar token', hint: 'T' },
   { id: 'measure', label: 'Regua', hint: 'M' },
   { id: 'ping', label: 'Ping', hint: 'P' },
   { id: 'fog', label: 'Fog', hint: 'F' },
   { id: 'door', label: 'Porta', hint: 'D' },
   { id: 'light', label: 'Luz', hint: 'L' },
-  { id: 'note', label: 'Nota', hint: 'N' },
-  { id: 'template', label: 'Area', hint: 'A' }
+  { id: 'note', label: 'Nota', hint: 'N' }
 ];
 
 export function SessionToolbar({

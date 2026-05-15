@@ -145,7 +145,7 @@ export interface OmnivitaCodeEvaluationResponse {
 
 export type TabletopMode = 'build' | 'session';
 export type MapLayerKey = 'floor' | 'walls' | 'doors' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
-export type MapTool = 'select' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token' | 'template';
+export type MapTool = 'select' | 'pan' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token' | 'template';
 export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
 export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
@@ -292,6 +292,7 @@ export interface MapObject {
   kind: MapObjectKind;
   name: string;
   groupId?: string;
+  attachedToMapInstanceId?: string;
   scale: number;
   visibleToPlayers: boolean;
   color?: string;
@@ -355,6 +356,7 @@ export interface TabletopToken {
   auraColor?: string;
   instability?: number;
   hidden?: boolean;
+  attachedToMapInstanceId?: string;
 }
 
 export type SavedMap = OmniMap;
@@ -426,6 +428,7 @@ export interface LightingRegion {
   visibleToGM: boolean;
   affectsVision?: boolean;
   affectsFog?: boolean;
+  attachedToMapInstanceId?: string;
   note?: string;
 }
 
@@ -462,6 +465,7 @@ export interface AreaTemplate {
   color: string;
   opacity: number;
   visibleToPlayers: boolean;
+  attachedToMapInstanceId?: string;
   createdAt?: string;
 }
 

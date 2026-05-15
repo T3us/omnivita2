@@ -92,6 +92,14 @@ export type {
 
 export type ObjectLayerKey = 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'notes';
 
+export type SessionSelectedEntity =
+  | { type: 'token'; id: string }
+  | { type: 'map'; id: string }
+  | { type: 'object'; id: string }
+  | { type: 'region'; id: string }
+  | { type: 'template'; id: string }
+  | { type: 'door'; id: string; x: number; y: number };
+
 export interface AvailableTabletopToken {
   id: string;
   sourceId: string;

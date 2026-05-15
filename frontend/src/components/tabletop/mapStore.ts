@@ -23,6 +23,7 @@ import type {
   MapTool,
   OmniMap,
   SelectedTileCell,
+  SessionSelectedEntity,
   SessionLightingState,
   SessionMapInstance,
   SnapMode,
@@ -41,6 +42,7 @@ interface TabletopStore {
   selectedTileCells: SelectedTileCell[];
   selectedMapInstanceIds: string[];
   selectedRegionIds: string[];
+  selectedEntities: SessionSelectedEntity[];
   selectedTokenId: string;
   selectedTokenIds: string[];
   placementRotation: number;
@@ -99,6 +101,12 @@ interface TabletopStore {
   resetSelectedRotation(): void;
   resetSelectedScale(): void;
   selectObject(objectId: string, additive?: boolean): void;
+  setSelection(entities: SessionSelectedEntity[]): void;
+  addToSelection(entities: SessionSelectedEntity[]): void;
+  toggleSelection(entity: SessionSelectedEntity): void;
+  clearSelection(): void;
+  selectEntity(entity: SessionSelectedEntity, additive?: boolean): void;
+  getSelectionSummary(): { tokens: number; maps: number; objects: number; regions: number; templates: number; doors: number; total: number };
   selectObjects(objectIds: string[], additive?: boolean): void;
   selectObjectsInRect(rect: { x: number; y: number; width: number; height: number }, additive?: boolean): void;
   selectArea(rect: { x: number; y: number; width: number; height: number }, additive?: boolean): void;
@@ -108,6 +116,7 @@ interface TabletopStore {
   updateSelectedTiles(patch: Partial<TileCell>): void;
   updateSelectedObjects(patch: Partial<MapObject>): void;
   moveSelectedObjects(deltaX: number, deltaY: number, snapOverride?: SnapMode | null): void;
+  moveSelectedSessionItems(deltaX: number, deltaY: number): void;
   nudgeSelectedObjects(deltaX: number, deltaY: number): void;
   rotateSelectedObjects(delta: number): void;
   rotateSelectedTiles(delta: number): void;
@@ -174,6 +183,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   selectedTileCells: [],
   selectedMapInstanceIds: [],
   selectedRegionIds: [],
+  selectedEntities: [],
   selectedTokenId: '',
   selectedTokenIds: [],
   placementRotation: 0,
@@ -205,6 +215,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       selectedTileCells: [],
       selectedMapInstanceIds: [],
       selectedRegionIds: [],
+      selectedEntities: [],
       selectedTokenId: '',
       selectedTokenIds: [],
       soloLayer: null,
@@ -224,6 +235,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       selectedTileCells: [],
       selectedMapInstanceIds: [],
       selectedRegionIds: [],
+      selectedEntities: [],
       selectedTokenId: '',
       selectedTokenIds: [],
       soloLayer: null,
@@ -242,7 +254,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   },
 
   setMode(mode) {
-    set((state) => ({ map: { ...state.map, mode }, tool: mode === 'build' ? state.tool : 'select', selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedTokenId: '', selectedTokenIds: [], ...pushHistory(state), dirty: true }));
+    set((state) => ({ map: { ...state.map, mode }, tool: mode === 'build' ? state.tool : 'select', selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [], ...pushHistory(state), dirty: true }));
   },
 
   setTool(tool) {
@@ -346,6 +358,9 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedObjectId: '',
         selectedObjectIds: [],
         selectedTileCells: [],
+        selectedMapInstanceIds: [],
+        selectedRegionIds: [],
+        selectedEntities: [],
         selectedTokenId: '',
         selectedTokenIds: [],
         dirty: true
@@ -364,6 +379,9 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedObjectId: '',
         selectedObjectIds: [],
         selectedTileCells: [],
+        selectedMapInstanceIds: [],
+        selectedRegionIds: [],
+        selectedEntities: [],
         selectedTokenId: '',
         selectedTokenIds: [],
         dirty: true
@@ -430,7 +448,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     set((state) => {
       const next = cloneMap(state.map);
       eraseCells(next, x, y, brushSize, state.eraseMode);
-      return { map: next, dirty: true, selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [] };
+      return { map: next, dirty: true, selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [] };
     });
   },
 
@@ -439,7 +457,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     set((state) => {
       const next = cloneMap(state.map);
       erasePoint(next, x, y, brushSize, state.eraseMode);
-      return { map: next, dirty: true, selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [] };
+      return { map: next, dirty: true, selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [] };
     });
   },
 
@@ -447,7 +465,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     set((state) => {
       const next = cloneMap(state.map);
       erasePoint(next, x, y, 1, state.eraseMode);
-      return { map: next, dirty: true, selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [] };
+      return { map: next, dirty: true, selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [] };
     });
   },
 
@@ -471,7 +489,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const target = getObjectLayer(next, object.layer);
       if (!target || target.locked || target.editable === false) return state;
       target.objects.push(object);
-      return { map: next, selectedObjectId: object.id, selectedObjectIds: [object.id], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+      return { map: next, selectedObjectId: object.id, selectedObjectIds: [object.id], selectedEntities: [{ type: 'object' as const, id: object.id }], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
@@ -508,6 +526,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedObjectId: '',
         selectedObjectIds: [],
         selectedTileCells,
+        selectedEntities: [{ type: 'door' as const, id: `door-${x}-${y}`, x, y }],
         selectedTokenId: '',
         selectedTokenIds: [],
         historyPast: history.historyPast,
@@ -641,8 +660,49 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         if (!layer || layer.locked || layer.editable === false) return;
         layer.cells = removeTileAtCell(next, cell.layer, cell.x, cell.y);
       });
-      return { map: next, selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+      return { map: next, selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
+  },
+
+  setSelection(entities) {
+    set((state) => selectionPatchFromEntities(state, entities));
+  },
+
+  addToSelection(entities) {
+    set((state) => selectionPatchFromEntities(state, [...state.selectedEntities, ...entities]));
+  },
+
+  toggleSelection(entity) {
+    set((state) => {
+      const key = selectionEntityKey(entity);
+      const exists = state.selectedEntities.some((entry) => selectionEntityKey(entry) === key);
+      const entities = exists
+        ? state.selectedEntities.filter((entry) => selectionEntityKey(entry) !== key)
+        : [...state.selectedEntities, entity];
+      return selectionPatchFromEntities(state, entities);
+    });
+  },
+
+  clearSelection() {
+    get().clearSessionSelection();
+  },
+
+  selectEntity(entity, additive = false) {
+    set((state) => {
+      const entities = additive ? toggleSelectionList(state.selectedEntities, entity) : [entity];
+      return selectionPatchFromEntities(state, entities);
+    });
+  },
+
+  getSelectionSummary() {
+    const state = get();
+    const tokens = state.selectedTokenIds.length;
+    const maps = state.selectedMapInstanceIds.length;
+    const objects = state.selectedObjectIds.length;
+    const regions = state.selectedRegionIds.length;
+    const templates = state.selectedEntities.filter((entry) => entry.type === 'template').length;
+    const doors = state.selectedTileCells.length;
+    return { tokens, maps, objects, regions, templates, doors, total: tokens + maps + objects + regions + templates + doors };
   },
 
   selectObject(objectId, additive = false) {
@@ -660,6 +720,10 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedTileCells: [],
         selectedMapInstanceIds: [],
         selectedRegionIds: [],
+        selectedEntities: [
+          ...(additive ? state.selectedEntities.filter((entry) => entry.type !== 'object') : []),
+          ...selectedObjectIds.map((id) => ({ type: 'object' as const, id }))
+        ],
         selectedTokenId: '',
         selectedTokenIds: []
       };
@@ -676,6 +740,10 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedTileCells: [],
         selectedMapInstanceIds: [],
         selectedRegionIds: [],
+        selectedEntities: [
+          ...(additive ? state.selectedEntities.filter((entry) => entry.type !== 'object') : []),
+          ...selectedObjectIds.map((id) => ({ type: 'object' as const, id }))
+        ],
         selectedTokenId: '',
         selectedTokenIds: []
       };
@@ -734,6 +802,13 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         .filter((region) => rectsIntersect(getLightingRegionBounds(region), area))
         .map((region) => region.id);
       const selectedRegionIds = additive ? uniqueList([...state.selectedRegionIds, ...regionIds]) : uniqueList(regionIds);
+      const selectedEntities: SessionSelectedEntity[] = [
+        ...selectedTokenIds.map((id) => ({ type: 'token' as const, id })),
+        ...selectedObjectIds.map((id) => ({ type: 'object' as const, id })),
+        ...selectedMapInstanceIds.map((id) => ({ type: 'map' as const, id })),
+        ...selectedRegionIds.map((id) => ({ type: 'region' as const, id })),
+        ...selectedTileCells.map((cell) => ({ type: 'door' as const, id: `door-${cell.x}-${cell.y}`, x: cell.x, y: cell.y }))
+      ];
       return {
         selectedTokenId: selectedTokenIds[selectedTokenIds.length - 1] || '',
         selectedTokenIds,
@@ -741,17 +816,18 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedObjectIds,
         selectedMapInstanceIds,
         selectedRegionIds,
-        selectedTileCells
+        selectedTileCells,
+        selectedEntities
       };
     });
   },
 
   clearObjectSelection() {
-    set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedTokenId: '', selectedTokenIds: [] });
+    set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [] });
   },
 
   clearSessionSelection() {
-    set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedTokenId: '', selectedTokenIds: [] });
+    set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [] });
   },
 
   updateSelectedTiles(patch) {
@@ -1135,11 +1211,12 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         brightVisionRadius: source.brightVisionRadius ?? 4,
         lightRadius: source.lightRadius ?? 0,
         auraColor: source.auraColor,
-        statusMarkers: source.statusMarkers || []
+        statusMarkers: source.statusMarkers || [],
+        attachedToMapInstanceId: findMapInstanceAtWorldPoint(next, Math.round(x) * next.gridSize + next.gridSize / 2, Math.round(y) * next.gridSize + next.gridSize / 2)?.id
       };
       next.tokens.push(token);
       markExploredAroundToken(next, token);
-      return { map: next, selectedTokenId: token.id, selectedTokenIds: [token.id], selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+      return { map: next, selectedTokenId: token.id, selectedTokenIds: [token.id], selectedEntities: [{ type: 'token' as const, id: token.id }], selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
@@ -1208,7 +1285,15 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const next = cloneMap(state.map);
       next.tokens = next.tokens.filter((entry) => entry.id !== tokenId);
       const selectedTokenIds = state.selectedTokenIds.filter((id) => id !== tokenId);
-      return { map: next, selectedTokenId: selectedTokenIds[selectedTokenIds.length - 1] || '', selectedTokenIds, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+      return {
+        map: next,
+        selectedTokenId: selectedTokenIds[selectedTokenIds.length - 1] || '',
+        selectedTokenIds,
+        selectedEntities: state.selectedEntities.filter((entry) => !(entry.type === 'token' && entry.id === tokenId)),
+        historyPast: history.historyPast,
+        historyFuture: history.historyFuture,
+        dirty: true
+      };
     });
   },
 
@@ -1219,7 +1304,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const selected = new Set(state.selectedTokenIds);
       const next = cloneMap(state.map);
       next.tokens = next.tokens.filter((entry) => !selected.has(entry.id) || entry.locked);
-      return { map: next, selectedTokenId: '', selectedTokenIds: [], historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+      return { map: next, selectedTokenId: '', selectedTokenIds: [], selectedEntities: state.selectedEntities.filter((entry) => entry.type !== 'token'), historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
     });
   },
 
@@ -1231,10 +1316,15 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       return {
         selectedTokenId: selectedTokenIds[selectedTokenIds.length - 1] || '',
         selectedTokenIds,
+        selectedEntities: [
+          ...(additive ? state.selectedEntities.filter((entry) => entry.type !== 'token') : []),
+          ...selectedTokenIds.map((id) => ({ type: 'token' as const, id }))
+        ],
         selectedObjectId: additive ? state.selectedObjectId : '',
         selectedObjectIds: additive ? state.selectedObjectIds : [],
         selectedTileCells: additive ? state.selectedTileCells : [],
-        selectedMapInstanceIds: additive ? state.selectedMapInstanceIds : []
+        selectedMapInstanceIds: additive ? state.selectedMapInstanceIds : [],
+        selectedRegionIds: additive ? state.selectedRegionIds : []
       };
     });
   },
@@ -1246,10 +1336,15 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       return {
         selectedTokenId: selectedTokenIds[selectedTokenIds.length - 1] || '',
         selectedTokenIds,
+        selectedEntities: [
+          ...(additive ? state.selectedEntities.filter((entry) => entry.type !== 'token') : []),
+          ...selectedTokenIds.map((id) => ({ type: 'token' as const, id }))
+        ],
         selectedObjectId: additive ? state.selectedObjectId : '',
         selectedObjectIds: additive ? state.selectedObjectIds : [],
         selectedTileCells: additive ? state.selectedTileCells : [],
-        selectedMapInstanceIds: additive ? state.selectedMapInstanceIds : []
+        selectedMapInstanceIds: additive ? state.selectedMapInstanceIds : [],
+        selectedRegionIds: additive ? state.selectedRegionIds : []
       };
     });
   },
@@ -1367,8 +1462,13 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     set((state) => {
       const exists = (state.map.sessionLighting?.regions || state.map.lightingRegions || []).some((region) => region.id === regionId);
       if (!exists) return state;
+      const selectedRegionIds = additive ? toggleListValue(state.selectedRegionIds, regionId) : [regionId];
       return {
-        selectedRegionIds: additive ? toggleListValue(state.selectedRegionIds, regionId) : [regionId],
+        selectedRegionIds,
+        selectedEntities: [
+          ...(additive ? state.selectedEntities.filter((entry) => entry.type !== 'region') : []),
+          ...selectedRegionIds.map((id) => ({ type: 'region' as const, id }))
+        ],
         selectedObjectId: additive ? state.selectedObjectId : '',
         selectedObjectIds: additive ? state.selectedObjectIds : [],
         selectedTileCells: additive ? state.selectedTileCells : [],
@@ -1382,6 +1482,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   moveSelectedLightingRegions(deltaX, deltaY) {
     set((state) => {
       if (!state.selectedRegionIds.length) return state;
+      const history = pushHistory(state);
       const selected = new Set(state.selectedRegionIds);
       const current = getSessionLighting(state.map);
       const next = {
@@ -1394,6 +1495,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       };
       return {
         map: { ...state.map, sessionLighting: next, lightingRegions: next.regions },
+        historyPast: history.historyPast,
+        historyFuture: history.historyFuture,
         dirty: true
       };
     });
@@ -1458,9 +1561,11 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
           sessionMapInstances: [...(state.map.sessionMapInstances || []), instance]
         },
         selectedMapInstanceIds: [instance.id],
+        selectedEntities: [{ type: 'map' as const, id: instance.id }],
         selectedObjectId: '',
         selectedObjectIds: [],
         selectedTileCells: [],
+        selectedRegionIds: [],
         selectedTokenId: '',
         selectedTokenIds: [],
         dirty: true
@@ -1469,15 +1574,20 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   },
 
   updateSessionMapInstance(instanceId, patch) {
-    set((state) => ({
-      map: {
-        ...state.map,
-        sessionMapInstances: (state.map.sessionMapInstances || []).map((instance) => (
-          instance.id === instanceId ? { ...instance, ...patch } : instance
-        ))
-      },
-      dirty: true
-    }));
+    set((state) => {
+      const history = pushHistory(state);
+      return {
+        map: {
+          ...state.map,
+          sessionMapInstances: (state.map.sessionMapInstances || []).map((instance) => (
+            instance.id === instanceId ? { ...instance, ...patch } : instance
+          ))
+        },
+        historyPast: history.historyPast,
+        historyFuture: history.historyFuture,
+        dirty: true
+      };
+    });
   },
 
   removeSessionMapInstance(instanceId) {
@@ -1487,6 +1597,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         sessionMapInstances: (state.map.sessionMapInstances || []).filter((instance) => instance.id !== instanceId)
       },
       selectedMapInstanceIds: state.selectedMapInstanceIds.filter((id) => id !== instanceId),
+      selectedEntities: state.selectedEntities.filter((entry) => !(entry.type === 'map' && entry.id === instanceId)),
       dirty: true
     }));
   },
@@ -1510,6 +1621,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
           sessionMapInstances: [...(state.map.sessionMapInstances || []), clone]
         },
         selectedMapInstanceIds: [clone.id],
+        selectedEntities: [{ type: 'map' as const, id: clone.id }],
         dirty: true
       };
     });
@@ -1522,11 +1634,16 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const selectedMapInstanceIds = additive ? toggleListValue(state.selectedMapInstanceIds, instanceId) : [instanceId];
       return {
         selectedMapInstanceIds,
+        selectedEntities: [
+          ...(additive ? state.selectedEntities.filter((entry) => entry.type !== 'map') : []),
+          ...selectedMapInstanceIds.map((id) => ({ type: 'map' as const, id }))
+        ],
         selectedObjectId: additive ? state.selectedObjectId : '',
         selectedObjectIds: additive ? state.selectedObjectIds : [],
         selectedTileCells: additive ? state.selectedTileCells : [],
         selectedTokenId: additive ? state.selectedTokenId : '',
-        selectedTokenIds: additive ? state.selectedTokenIds : []
+        selectedTokenIds: additive ? state.selectedTokenIds : [],
+        selectedRegionIds: additive ? state.selectedRegionIds : []
       };
     });
   },
@@ -1534,6 +1651,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   moveSelectedMapInstances(deltaX, deltaY) {
     set((state) => {
       if (!state.selectedMapInstanceIds.length) return state;
+      const history = pushHistory(state);
       const selected = new Set(state.selectedMapInstanceIds);
       return {
         map: {
@@ -1544,6 +1662,94 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
               : instance
           ))
         },
+        historyPast: history.historyPast,
+        historyFuture: history.historyFuture,
+        dirty: true
+      };
+    });
+  },
+
+  moveSelectedSessionItems(deltaX, deltaY) {
+    set((state) => {
+      const hasSelection = state.selectedTokenIds.length
+        || state.selectedMapInstanceIds.length
+        || state.selectedObjectIds.length
+        || state.selectedRegionIds.length
+        || state.selectedEntities.some((entity) => entity.type === 'template');
+      if (!hasSelection) return state;
+
+      const history = pushHistory(state);
+      const next = cloneMap(state.map);
+      const selectedMapInstances = new Set(state.selectedMapInstanceIds);
+      const selectedObjects = new Set(state.selectedObjectIds);
+      const selectedRegions = new Set(state.selectedRegionIds);
+      const selectedTokens = new Set(state.selectedTokenIds);
+      const selectedTemplates = new Set(state.selectedEntities.filter((entity) => entity.type === 'template').map((entity) => entity.id));
+      const tokenDeltaX = Math.round(deltaX / Math.max(1, next.gridSize));
+      const tokenDeltaY = Math.round(deltaY / Math.max(1, next.gridSize));
+
+      next.sessionMapInstances = (next.sessionMapInstances || []).map((instance) => (
+        selectedMapInstances.has(instance.id) && !instance.locked
+          ? { ...instance, x: instance.x + deltaX, y: instance.y + deltaY }
+          : instance
+      ));
+
+      getAllMapObjects(next).forEach((object) => {
+        const attachedToMovedMap = Boolean(object.attachedToMapInstanceId && selectedMapInstances.has(object.attachedToMapInstanceId));
+        if (!selectedObjects.has(object.id) && !attachedToMovedMap) return;
+        if (object.locked) return;
+        object.x += deltaX;
+        object.y += deltaY;
+        if (object.light) {
+          object.light.x = object.x;
+          object.light.y = object.y;
+        }
+      });
+
+      if (selectedRegions.size || selectedMapInstances.size) {
+        const current = getSessionLighting(next);
+        const lighting = {
+          ...current,
+          regions: current.regions.map((region) => {
+            const attachedToMovedMap = Boolean(region.attachedToMapInstanceId && selectedMapInstances.has(region.attachedToMapInstanceId));
+            return selectedRegions.has(region.id) || attachedToMovedMap
+              ? { ...region, points: region.points.map((point) => ({ x: point.x + deltaX, y: point.y + deltaY })) }
+              : region;
+          })
+        };
+        next.sessionLighting = lighting;
+        next.lightingRegions = lighting.regions;
+      }
+
+      if (selectedTemplates.size || selectedMapInstances.size) {
+        next.areaTemplates = (next.areaTemplates || []).map((template) => {
+          const attachedToMovedMap = Boolean(template.attachedToMapInstanceId && selectedMapInstances.has(template.attachedToMapInstanceId));
+          return selectedTemplates.has(template.id) || attachedToMovedMap
+            ? { ...template, x: template.x + deltaX, y: template.y + deltaY }
+            : template;
+        });
+      }
+
+      if (tokenDeltaX || tokenDeltaY) {
+        next.tokens.forEach((token) => {
+          const attachedToMovedMap = Boolean(token.attachedToMapInstanceId && selectedMapInstances.has(token.attachedToMapInstanceId));
+          if (!selectedTokens.has(token.id) && !attachedToMovedMap) return;
+          if (token.locked) return;
+          const target = {
+            x: Math.round(token.x + tokenDeltaX),
+            y: Math.round(token.y + tokenDeltaY)
+          };
+          if (!state.sessionIgnoreCollision && isTokenMoveBlocked(next, token, target.x, target.y)) return;
+          token.x = target.x;
+          token.y = target.y;
+          markExploredAroundToken(next, token);
+        });
+      }
+
+      return {
+        map: next,
+        historyPast: history.historyPast,
+        historyFuture: history.historyFuture,
         dirty: true
       };
     });
@@ -1956,13 +2162,79 @@ function getSessionLighting(map: OmniMap): SessionLightingState {
 }
 
 function isTokenMoveBlocked(map: OmniMap, token: TabletopToken, x: number, y: number) {
+  return !canMoveTokenAlongBoardPath(map, token, { x: token.x, y: token.y }, { x, y }).valid;
+}
+
+function canMoveTokenAlongBoardPath(
+  map: OmniMap,
+  token: TabletopToken,
+  from: { x: number; y: number },
+  to: { x: number; y: number }
+) {
+  const path = bresenhamCells(Math.round(from.x), Math.round(from.y), Math.round(to.x), Math.round(to.y));
+  let lastValidCell = { x: Math.round(from.x), y: Math.round(from.y) };
+  for (const cell of path) {
+    if (isTokenFootprintBlockedOnBoard(map, token, cell.x, cell.y)) {
+      return {
+        valid: false,
+        lastValidCell,
+        blockedAt: cell,
+        reason: 'blocked'
+      };
+    }
+    lastValidCell = cell;
+  }
+  return { valid: true, lastValidCell };
+}
+
+function isTokenFootprintBlockedOnBoard(map: OmniMap, token: TabletopToken, x: number, y: number) {
   const size = Math.max(1, Number(token.size || 1));
   for (let dy = 0; dy < size; dy += 1) {
     for (let dx = 0; dx < size; dx += 1) {
-      if (isMovementBlockedCell(map, x + dx, y + dy)) return true;
+      if (getBlockingAtWorldCell(map, x + dx, y + dy)) return true;
     }
   }
   return false;
+}
+
+function getBlockingAtWorldCell(map: OmniMap, x: number, y: number) {
+  if (isMovementBlockedCell(map, x, y)) return true;
+
+  const worldPoint = cellCenter(map, { x, y });
+  const instances = getMapInstancesAtWorldPoint(map, worldPoint.x, worldPoint.y).filter((instance) => instance.data);
+
+  for (const instance of instances) {
+    const local = worldToMapInstanceCell(instance, worldPoint.x, worldPoint.y);
+    if (!local || !instance.data) continue;
+    if (isMovementBlockedCell(instance.data, local.x, local.y)) return true;
+  }
+
+  return false;
+}
+
+function findMapInstanceAtWorldPoint(map: OmniMap, worldX: number, worldY: number) {
+  return getMapInstancesAtWorldPoint(map, worldX, worldY)[0] || null;
+}
+
+function getMapInstancesAtWorldPoint(map: OmniMap, worldX: number, worldY: number) {
+  return [...(map.sessionMapInstances || [])]
+    .filter((instance) => pointInsideMapInstance(instance, worldX, worldY))
+    .sort((left, right) => Number(right.zIndex || 0) - Number(left.zIndex || 0));
+}
+
+function worldToMapInstanceCell(instance: SessionMapInstance, worldX: number, worldY: number) {
+  if (!pointInsideMapInstance(instance, worldX, worldY)) return null;
+  const gridSize = Math.max(1, instance.gridSize);
+  return {
+    x: Math.floor((worldX - instance.x) / gridSize),
+    y: Math.floor((worldY - instance.y) / gridSize)
+  };
+}
+
+function pointInsideMapInstance(instance: SessionMapInstance, worldX: number, worldY: number) {
+  const width = instance.width * instance.gridSize;
+  const height = instance.height * instance.gridSize;
+  return worldX >= instance.x && worldY >= instance.y && worldX < instance.x + width && worldY < instance.y + height;
 }
 
 function isMovementBlockedCell(map: OmniMap, x: number, y: number) {
@@ -1975,6 +2247,33 @@ function isMovementBlockedCell(map: OmniMap, x: number, y: number) {
   if (door && doorBlocksMovement(door)) return true;
   const point = cellCenter(map, { x, y });
   return getAllMapObjects(map).some((object) => object.blocksMovement && objectContainsPoint(object, point.x, point.y));
+}
+
+function bresenhamCells(x0: number, y0: number, x1: number, y1: number) {
+  const cells: Array<{ x: number; y: number }> = [];
+  let dx = Math.abs(x1 - x0);
+  let dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let error = dx + dy;
+  let x = x0;
+  let y = y0;
+
+  while (true) {
+    cells.push({ x, y });
+    if (x === x1 && y === y1) break;
+    const e2 = error * 2;
+    if (e2 >= dy) {
+      error += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      error += dx;
+      y += sy;
+    }
+  }
+
+  return cells;
 }
 
 function doorBlocksMovement(door: TileCell) {
@@ -2108,6 +2407,39 @@ function uniqueTileCells(values: SelectedTileCell[]) {
 
 function uniqueList(values: string[]) {
   return Array.from(new Set(values));
+}
+
+function selectionEntityKey(entity: SessionSelectedEntity) {
+  if (entity.type === 'door') return `${entity.type}:${entity.x}:${entity.y}`;
+  return `${entity.type}:${entity.id}`;
+}
+
+function toggleSelectionList(values: SessionSelectedEntity[], entity: SessionSelectedEntity) {
+  const key = selectionEntityKey(entity);
+  return values.some((entry) => selectionEntityKey(entry) === key)
+    ? values.filter((entry) => selectionEntityKey(entry) !== key)
+    : [...values, entity];
+}
+
+function selectionPatchFromEntities(_state: TabletopStore, entities: SessionSelectedEntity[]) {
+  const unique = Array.from(new Map(entities.map((entity) => [selectionEntityKey(entity), entity])).values());
+  const selectedTokenIds = unique.filter((entity): entity is { type: 'token'; id: string } => entity.type === 'token').map((entity) => entity.id);
+  const selectedObjectIds = unique.filter((entity): entity is { type: 'object'; id: string } => entity.type === 'object').map((entity) => entity.id);
+  const selectedMapInstanceIds = unique.filter((entity): entity is { type: 'map'; id: string } => entity.type === 'map').map((entity) => entity.id);
+  const selectedRegionIds = unique.filter((entity): entity is { type: 'region'; id: string } => entity.type === 'region').map((entity) => entity.id);
+  const selectedTileCells = unique
+    .filter((entity): entity is { type: 'door'; id: string; x: number; y: number } => entity.type === 'door')
+    .map((entity) => ({ layer: 'doors' as TileLayerKey, x: entity.x, y: entity.y }));
+  return {
+    selectedEntities: unique,
+    selectedTokenId: selectedTokenIds[selectedTokenIds.length - 1] || '',
+    selectedTokenIds,
+    selectedObjectId: selectedObjectIds[selectedObjectIds.length - 1] || '',
+    selectedObjectIds,
+    selectedMapInstanceIds,
+    selectedRegionIds,
+    selectedTileCells
+  };
 }
 
 function normalizeRotation45(value: number) {

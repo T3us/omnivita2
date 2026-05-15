@@ -296,6 +296,7 @@ export function TabletopPage({
 
   return (
     <div className="grid min-h-0 gap-4">
+      {map.mode !== 'session' ? (
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -310,6 +311,7 @@ export function TabletopPage({
           {message ? <Badge tone={message.includes('Falha') ? 'danger' : 'good'}>{message}</Badge> : null}
         </div>
       </Card>
+      ) : null}
 
       {map.mode === 'session' ? (
         <SessionModeView

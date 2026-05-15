@@ -1,15 +1,16 @@
-import type Konva from 'konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
-import type { ReactNode } from 'react';
+import type { DragEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import { getAsset } from '../assets';
 import { useTabletopStore } from '../mapStore';
-import type { AreaTemplate, LightingRegion, MapLayerKey, MapObject, MapTool, ObjectLayer, OmniMap, SessionMapInstance, TabletopToken, TileCell, TileLayer } from '../types';
+import type { AreaTemplate, AvailableTabletopToken, LightingRegion, MapLayerKey, MapObject, MapTool, ObjectLayer, OmniMap, SessionMapInstance, TabletopToken, TileCell, TileLayer } from '../types';
+import { SelectionOverlay } from './SelectionOverlay';
+import { useCameraController } from './useCameraController';
+import { useSessionInputController } from './useSessionInputController';
 
 const GRID_LINE = 'rgba(196,181,253,0.14)';
 const VISION_BLOCKERS: Array<'walls' | 'doors'> = ['walls', 'doors'];
-type Ruler = { id: string; start: { x: number; y: number }; end: { x: number; y: number } };
 
 export function SessionStage() {
   const map = useTabletopStore((state) => state.map);
@@ -22,52 +23,51 @@ export function SessionStage() {
   const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
   const selectedMapInstanceIds = useTabletopStore((state) => state.selectedMapInstanceIds);
   const selectedRegionIds = useTabletopStore((state) => state.selectedRegionIds);
+  const selectedEntities = useTabletopStore((state) => state.selectedEntities);
   const sessionViewMode = useTabletopStore((state) => state.sessionViewMode);
   const sessionDynamicVision = useTabletopStore((state) => state.sessionDynamicVision);
   const sessionFogEnabled = useTabletopStore((state) => state.sessionFogEnabled);
   const sessionGlobalDarkness = useTabletopStore((state) => state.sessionGlobalDarkness);
-  const sessionRegionPreset = useTabletopStore((state) => state.sessionRegionPreset);
-  const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
-  const placementRotation = useTabletopStore((state) => state.placementRotation);
   const selectToken = useTabletopStore((state) => state.selectToken);
   const selectObject = useTabletopStore((state) => state.selectObject);
   const selectSessionArea = useTabletopStore((state) => state.selectSessionArea);
-  const clearSessionSelection = useTabletopStore((state) => state.clearSessionSelection);
   const moveToken = useTabletopStore((state) => state.moveToken);
-  const moveSelectedTokens = useTabletopStore((state) => state.moveSelectedTokens);
-  const moveSelectedMapInstances = useTabletopStore((state) => state.moveSelectedMapInstances);
   const moveSelectedLightingRegions = useTabletopStore((state) => state.moveSelectedLightingRegions);
   const selectMapInstance = useTabletopStore((state) => state.selectMapInstance);
   const updateSessionMapInstance = useTabletopStore((state) => state.updateSessionMapInstance);
   const selectLightingRegion = useTabletopStore((state) => state.selectLightingRegion);
-  const removeSelectedLightingRegions = useTabletopStore((state) => state.removeSelectedLightingRegions);
-  const addObject = useTabletopStore((state) => state.addObject);
-  const addAreaTemplate = useTabletopStore((state) => state.addAreaTemplate);
-  const addLightingRegion = useTabletopStore((state) => state.addLightingRegion);
-  const setSessionRegionPreset = useTabletopStore((state) => state.setSessionRegionPreset);
-  const revealFogCell = useTabletopStore((state) => state.revealFogCell);
-  const hideFogCell = useTabletopStore((state) => state.hideFogCell);
   const toggleDoorAt = useTabletopStore((state) => state.toggleDoorAt);
   const captureHistory = useTabletopStore((state) => state.captureHistory);
 
   const viewportRef = useRef<HTMLDivElement>(null);
-  const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
-  const regionStartRef = useRef<{ x: number; y: number } | null>(null);
-  const spacePressedRef = useRef(false);
-  const panStartRef = useRef<{ pointer: { x: number; y: number }; camera: { x: number; y: number } } | null>(null);
-  const fogStrokeRef = useRef(false);
-  const fogCellsRef = useRef(new Set<string>());
   const [viewport, setViewport] = useState({ width: 1100, height: 650 });
-  const [camera, setCamera] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [regionDraft, setRegionDraft] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [activeRulerDraft, setActiveRulerDraft] = useState<Ruler | null>(null);
-  const [rulerFinal, setRulerFinal] = useState<Ruler | null>(null);
-  const [pinnedRulers, setPinnedRulers] = useState<Ruler[]>([]);
-  const [keepLastRuler, setKeepLastRuler] = useState(false);
-  const [pings, setPings] = useState<Array<{ id: string; x: number; y: number; createdAt: number }>>([]);
-  const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null);
+  const cameraController = useCameraController({ zoom, setZoom });
+  const {
+    camera,
+    setCamera,
+    isPanning,
+    screenToWorld,
+    startPan,
+    updatePan,
+    endPan,
+    isPanningRef,
+    zoomAt,
+    resetCamera,
+    focusWorldRect
+  } = cameraController;
+  const input = useSessionInputController({
+    map,
+    tool,
+    viewMode: sessionViewMode,
+    camera,
+    zoom,
+    screenToWorld,
+    startPan,
+    updatePan,
+    endPan,
+    isPanningRef,
+    captureHistory
+  });
 
   const visibleCells = useMemo(
     () => sessionDynamicVision ? computeVisibleCells(map, sessionViewMode) : new Set<string>(),
@@ -77,6 +77,10 @@ export function SessionStage() {
   const selectedTokenSet = useMemo(() => new Set(selectedTokenIds), [selectedTokenIds]);
   const selectedMapInstanceSet = useMemo(() => new Set(selectedMapInstanceIds), [selectedMapInstanceIds]);
   const selectedRegionSet = useMemo(() => new Set(selectedRegionIds), [selectedRegionIds]);
+  const selectedTemplateSet = useMemo(
+    () => new Set(selectedEntities.filter((entity) => entity.type === 'template').map((entity) => entity.id)),
+    [selectedEntities]
+  );
   const effectiveDarkness = map.sessionLighting?.globalIllumination
     ? Math.max(0, sessionGlobalDarkness - (map.sessionLighting.ambientIntensity || 1))
     : sessionGlobalDarkness;
@@ -97,269 +101,60 @@ export function SessionStage() {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (tool === 'measure') return;
-    setActiveRulerDraft(null);
-    setRulerFinal(null);
-  }, [tool]);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (isEditableTarget(event.target)) return;
-      const key = event.key.toLowerCase();
-      if (event.code === 'Space') {
-        spacePressedRef.current = true;
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setActiveRulerDraft(null);
-        setRulerFinal(null);
-        clearSessionSelection();
-        return;
-      }
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        event.preventDefault();
-        useTabletopStore.getState().removeSelectedTokens();
-        useTabletopStore.getState().removeSelectedObjects();
-        removeSelectedLightingRegions();
-        return;
-      }
-      if (event.key.startsWith('Arrow') && (selectedTokenIds.length || selectedMapInstanceIds.length || selectedRegionIds.length)) {
-        event.preventDefault();
-        const step = event.shiftKey ? map.gridSize : event.altKey ? 4 : 1;
-        const delta = arrowDelta(event.key, step);
-        if (selectedTokenIds.length) moveSelectedTokens(delta.x / map.gridSize, delta.y / map.gridSize);
-        if (selectedMapInstanceIds.length) moveSelectedMapInstances(delta.x, delta.y);
-        if (selectedRegionIds.length) moveSelectedLightingRegions(delta.x, delta.y);
-        return;
-      }
-      if (key === 'm' && event.shiftKey) {
-        event.preventDefault();
-        setKeepLastRuler((value) => !value);
-        return;
-      }
-      const toolByKey: Partial<Record<string, MapTool>> = {
-        v: 'select',
-        t: 'token',
-        m: 'measure',
-        p: 'ping',
-        f: 'fog',
-        d: 'door',
-        l: 'light',
-        n: 'note',
-        a: 'template'
-      };
-      if (toolByKey[key]) {
-        event.preventDefault();
-        useTabletopStore.getState().setTool(toolByKey[key]);
-      }
-    }
-    function handleKeyUp(event: KeyboardEvent) {
-      if (event.code === 'Space') spacePressedRef.current = false;
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [clearSessionSelection, map.gridSize, moveSelectedLightingRegions, moveSelectedMapInstances, moveSelectedTokens, removeSelectedLightingRegions, selectedMapInstanceIds.length, selectedRegionIds.length, selectedTokenIds.length]);
-
-  function handlePointerDown(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
-    const screenPointer = getStagePointer(event.target.getStage());
-    if (!screenPointer) return;
-    const shouldPan = spacePressedRef.current
-      || getEventButton(event.evt) === 1
-      || (tool === 'select' && isStageTarget(event.target) && getEventButton(event.evt) === 0 && !isAdditiveEvent(event.evt));
-    if (shouldPan) {
-      event.evt.preventDefault();
-      if (tool === 'select' && getEventButton(event.evt) === 0 && isStageTarget(event.target)) clearSessionSelection();
-      panStartRef.current = { pointer: screenPointer, camera };
-      setIsPanning(true);
-      capturePointer(event);
-      return;
-    }
-    const pointer = screenToWorld(screenPointer, camera, zoom);
-    if (!pointer) return;
-    const cell = pointerToCell(pointer, map);
-    setHoverCell(cell);
-
-    if (tool === 'select') {
-      if (!isStageTarget(event.target)) return;
-      if (!isAdditiveEvent(event.evt)) clearSessionSelection();
-      selectionStartRef.current = pointer;
-      setSelectionBox({ x: pointer.x, y: pointer.y, width: 0, height: 0 });
-      return;
-    }
-
-    if (tool === 'fog') {
-      if (!cell) return;
-      captureHistory();
-      fogStrokeRef.current = true;
-      fogCellsRef.current = new Set();
-      paintFogCell(cell, isAdditiveEvent(event.evt));
-      return;
-    }
-
-    if (tool === 'measure') {
-      if (activeRulerDraft) {
-        const final = { ...activeRulerDraft, end: pointer };
-        setRulerFinal(keepLastRuler ? final : null);
-        setPinnedRulers((current) => keepLastRuler ? [...current, final].slice(-6) : current);
-        setActiveRulerDraft(null);
-        return;
-      }
-      setRulerFinal(null);
-      setActiveRulerDraft({ id: createStageId('ruler'), start: pointer, end: pointer });
-      return;
-    }
-
-    if (tool === 'ping') {
-      addPing(pointer);
-      return;
-    }
-
-    if (tool === 'template') {
-      if (sessionRegionPreset) {
-        regionStartRef.current = pointer;
-        setRegionDraft({ x: pointer.x, y: pointer.y, width: 0, height: 0 });
-        return;
-      }
-      addAreaTemplate(createTemplateAtPoint(map, pointer));
-      return;
-    }
-
-    if (tool === 'door') {
-      if (cell && isStageTarget(event.target)) toggleDoorAt(cell.x, cell.y);
-      return;
-    }
-
-    if (isSessionPlaceTool(tool)) {
-      addObject(selectedAssetId, pointer.x, pointer.y);
-    }
-  }
-
-  function handlePointerMove(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
-    const screenPointer = getStagePointer(event.target.getStage());
-    if (!screenPointer) return;
-    if (panStartRef.current) {
-      const dx = screenPointer.x - panStartRef.current.pointer.x;
-      const dy = screenPointer.y - panStartRef.current.pointer.y;
-      setCamera({ x: panStartRef.current.camera.x + dx, y: panStartRef.current.camera.y + dy });
-      return;
-    }
-    const pointer = screenToWorld(screenPointer, camera, zoom);
-    if (!pointer) return;
-    const cell = pointerToCell(pointer, map);
-    setHoverCell(cell);
-    if (selectionStartRef.current && tool === 'select') {
-      setSelectionBox({
-        x: selectionStartRef.current.x,
-        y: selectionStartRef.current.y,
-        width: pointer.x - selectionStartRef.current.x,
-        height: pointer.y - selectionStartRef.current.y
-      });
-      return;
-    }
-    if (regionStartRef.current && tool === 'template' && sessionRegionPreset) {
-      setRegionDraft({
-        x: regionStartRef.current.x,
-        y: regionStartRef.current.y,
-        width: pointer.x - regionStartRef.current.x,
-        height: pointer.y - regionStartRef.current.y
-      });
-      return;
-    }
-    if (fogStrokeRef.current && cell) {
-      paintFogCell(cell, isAdditiveEvent(event.evt));
-      return;
-    }
-    if (activeRulerDraft && tool === 'measure') {
-      setActiveRulerDraft({ ...activeRulerDraft, end: pointer });
-    }
-  }
-
-  function handlePointerUp(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
-    releasePointer(event);
-    if (selectionStartRef.current && selectionBox) {
-      const tiny = Math.abs(selectionBox.width) < 4 && Math.abs(selectionBox.height) < 4;
-      if (!tiny) selectSessionArea(selectionBox, isAdditiveEvent(event.evt));
-    }
-    if (regionStartRef.current && regionDraft && sessionRegionPreset) {
-      const tiny = Math.abs(regionDraft.width) < 8 && Math.abs(regionDraft.height) < 8;
-      if (!tiny) addLightingRegion(createLightingRegionFromBox(regionDraft, sessionRegionPreset));
-      regionStartRef.current = null;
-      setRegionDraft(null);
-      setSessionRegionPreset(null);
-    }
-    selectionStartRef.current = null;
-    panStartRef.current = null;
-    setIsPanning(false);
-    setSelectionBox(null);
-    fogStrokeRef.current = false;
-    fogCellsRef.current.clear();
-  }
-
-  function handleContextMenu(event: KonvaEventObject<PointerEvent>) {
-    event.evt.preventDefault();
-    if (tool === 'measure') {
-      setActiveRulerDraft(null);
-      setRulerFinal(null);
-    }
-  }
-
   function handleWheel(event: KonvaEventObject<WheelEvent>) {
     event.evt.preventDefault();
     const stage = event.target.getStage();
-    const screenPointer = getStagePointer(stage);
+    const screenPointer = stage?.getPointerPosition();
     if (!screenPointer) return;
-    const worldBefore = screenToWorld(screenPointer, camera, zoom);
     const direction = event.evt.deltaY > 0 ? -1 : 1;
-    const nextZoom = Math.max(0.35, Math.min(2.75, zoom * (direction > 0 ? 1.08 : 0.92)));
-    setZoom(nextZoom);
-    setCamera({
-      x: screenPointer.x - worldBefore.x * nextZoom,
-      y: screenPointer.y - worldBefore.y * nextZoom
-    });
+    const multiplier = event.evt.ctrlKey || event.evt.metaKey ? 1.035 : 1.08;
+    zoomAt(screenPointer, zoom * (direction > 0 ? multiplier : 1 / multiplier));
   }
 
-  function resetCamera() {
-    setCamera({ x: 0, y: 0 });
-    setZoom(1);
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
   }
 
-  function paintFogCell(cell: { x: number; y: number }, hide: boolean) {
-    const key = `${cell.x}:${cell.y}`;
-    if (fogCellsRef.current.has(key)) return;
-    fogCellsRef.current.add(key);
-    if (hide) hideFogCell(cell.x, cell.y);
-    else revealFogCell(cell.x, cell.y);
-  }
-
-  function addPing(point: { x: number; y: number }) {
-    const id = `ping-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setPings((current) => [...current, { id, x: point.x, y: point.y, createdAt: Date.now() }]);
-    window.setTimeout(() => {
-      setPings((current) => current.filter((ping) => ping.id !== id));
-    }, 1800);
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const point = input.getWorldPointFromClient(event.clientX, event.clientY, viewportRef.current);
+    if (!point) return;
+    const state = useTabletopStore.getState();
+    const tokenPayload = event.dataTransfer.getData('application/x-omnivita-token');
+    if (tokenPayload) {
+      try {
+        const token = JSON.parse(tokenPayload) as AvailableTabletopToken;
+        state.addToken(token, Math.round(point.x / map.gridSize), Math.round(point.y / map.gridSize));
+        state.setTool('select');
+        return;
+      } catch {
+        return;
+      }
+    }
+    const assetId = event.dataTransfer.getData('application/x-omnivita-asset');
+    if (assetId) {
+      state.addObject(assetId, point.x, point.y);
+      state.setTool('select');
+    }
   }
 
   return (
     <div
       ref={viewportRef}
-      className="relative h-[clamp(520px,calc(100vh-330px),760px)] min-h-0 select-none overflow-hidden rounded-lg border border-line bg-black/50 touch-none"
-      style={{ cursor: isPanning ? 'grabbing' : tool === 'select' ? 'grab' : undefined }}
+      className="relative h-[calc(100vh-190px)] min-h-[560px] select-none overflow-hidden rounded-lg border border-line bg-black/50 touch-none"
+      style={{ cursor: isPanning ? 'grabbing' : tool === 'pan' ? 'grab' : tool === 'select' ? 'crosshair' : undefined }}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       <Stage
         width={viewport.width}
         height={viewport.height}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onMouseLeave={handlePointerUp}
-        onContextMenu={handleContextMenu}
+        onPointerDown={input.handlePointerDown}
+        onPointerMove={input.handlePointerMove}
+        onPointerUp={input.handlePointerUp}
+        onPointerCancel={input.handlePointerUp}
+        onMouseLeave={input.handlePointerUp}
+        onContextMenu={input.handleContextMenu}
         onWheel={handleWheel}
       >
         <Layer x={camera.x} y={camera.y} scaleX={zoom} scaleY={zoom}>
@@ -384,112 +179,29 @@ export function SessionStage() {
           <SessionObjectLayer layer={map.notesLayer} map={map} tool={tool} selectedObjectIds={selectedObjectIds} viewMode={sessionViewMode} onSelect={selectObject} />
           <LightAuraLayer map={map} viewMode={sessionViewMode} />
           <LightingRegionLayer map={map} viewMode={sessionViewMode} tool={tool} selectedIds={selectedRegionSet} onSelect={selectLightingRegion} onMove={moveSelectedLightingRegions} />
-          <TokenLayerView map={map} tool={tool} selectedTokenIds={selectedTokenSet} viewMode={sessionViewMode} onSelect={selectToken} onMove={moveToken} onMoveSelected={moveSelectedTokens} />
-          <TemplateLayer map={map} viewMode={sessionViewMode} />
+          <TokenLayerView map={map} tool={tool} selectedTokenIds={selectedTokenSet} viewMode={sessionViewMode} onSelect={selectToken} onMove={moveToken} />
+          <TemplateLayer map={map} viewMode={sessionViewMode} tool={tool} selectedIds={selectedTemplateSet} />
           <SelectedDoorOverlay map={map} selectedTileCells={selectedTileCells} />
           <SessionFogOverlay map={map} enabled={sessionFogEnabled} viewMode={sessionViewMode} dynamic={sessionDynamicVision} visibleCells={visibleCells} darkness={effectiveDarkness} viewport={viewport} camera={camera} zoom={zoom} />
-          {selectionBox ? <SelectionBox box={selectionBox} /> : null}
-          {regionDraft ? <SelectionBox box={regionDraft} /> : null}
-          {pinnedRulers.map((ruler) => <RulerView key={ruler.id} map={map} ruler={ruler} />)}
-          {rulerFinal ? <RulerView map={map} ruler={rulerFinal} /> : null}
-          {activeRulerDraft ? <RulerView map={map} ruler={activeRulerDraft} /> : null}
-          <PingLayer pings={pings} />
-          {hoverCell && tool === 'fog' ? <Rect x={hoverCell.x * map.gridSize} y={hoverCell.y * map.gridSize} width={map.gridSize} height={map.gridSize} fill="#8b5cf6" opacity={0.14} stroke="#c4b5fd" dash={[4, 4]} /> : null}
+          {input.selectionBox ? <SelectionOverlay box={input.selectionBox} /> : null}
+          {input.regionDraft ? <SelectionOverlay box={input.regionDraft} /> : null}
+          {input.pinnedRulers.map((ruler) => <RulerView key={ruler.id} map={map} ruler={ruler} />)}
+          {input.rulerFinal ? <RulerView map={map} ruler={input.rulerFinal} /> : null}
+          {input.activeRulerDraft ? <RulerView map={map} ruler={input.activeRulerDraft} /> : null}
+          <PingLayer pings={input.pings} />
+          {input.hoverCell && tool === 'fog' ? <Rect x={input.hoverCell.x * map.gridSize} y={input.hoverCell.y * map.gridSize} width={map.gridSize} height={map.gridSize} fill="#8b5cf6" opacity={0.14} stroke="#c4b5fd" dash={[4, 4]} /> : null}
         </Layer>
       </Stage>
       <div className="pointer-events-auto absolute right-3 top-3 flex flex-wrap gap-2 rounded-lg border border-line bg-panel/95 p-2 text-xs text-textMuted">
         <button type="button" className="rounded-lg border border-line bg-white/5 px-2 py-1 font-bold text-textMain" onClick={resetCamera}>Reset camera</button>
-        <button type="button" className="rounded-lg border border-line bg-white/5 px-2 py-1 font-bold text-textMain" onClick={() => setCamera({ x: viewport.width / 2 - map.width * map.gridSize * zoom / 2, y: viewport.height / 2 - map.height * map.gridSize * zoom / 2 })}>Centralizar mapa</button>
+        <button type="button" className="rounded-lg border border-line bg-white/5 px-2 py-1 font-bold text-textMain" onClick={() => focusWorldRect({ x: 0, y: 0, width: map.width * map.gridSize, height: map.height * map.gridSize }, viewport)}>Centralizar mapa</button>
         <label className="flex items-center gap-1 rounded-lg border border-line bg-white/5 px-2 py-1">
-          <input type="checkbox" checked={keepLastRuler} onChange={(event) => setKeepLastRuler(event.target.checked)} />
+          <input type="checkbox" checked={input.keepLastRuler} onChange={(event) => input.setKeepLastRuler(event.target.checked)} />
           Fixar regua
         </label>
       </div>
     </div>
   );
-}
-
-function createStageId(prefix: string) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function createTemplateAtPoint(map: OmniMap, point: { x: number; y: number }): AreaTemplate {
-  const radius = map.gridSize * 3;
-  return {
-    id: `template-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    name: 'Area circular',
-    shape: 'circle',
-    x: point.x,
-    y: point.y,
-    width: radius * 2,
-    height: radius * 2,
-    radius,
-    color: '#67e8f9',
-    opacity: 0.22,
-    visibleToPlayers: true,
-    createdAt: new Date().toISOString()
-  };
-}
-
-function createLightingRegionFromBox(box: { x: number; y: number; width: number; height: number }, preset: 'light' | 'dark' | 'gm' | 'fog'): LightingRegion {
-  const x = Math.min(box.x, box.x + box.width);
-  const y = Math.min(box.y, box.y + box.height);
-  const width = Math.max(8, Math.abs(box.width));
-  const height = Math.max(8, Math.abs(box.height));
-  const base = {
-    id: createStageId(`${preset}-region`),
-    shape: 'rect' as const,
-    points: [{ x, y }, { x: x + width, y: y + height }],
-    visibleToGM: true,
-    affectsVision: true,
-    affectsFog: true
-  };
-  if (preset === 'light') {
-    return {
-      ...base,
-      name: 'Area clara',
-      darknessMode: 'subtract',
-      darkness: 0.8,
-      color: '#d8e6ff',
-      intensity: 0.75,
-      blocksGlobalIllumination: false,
-      visibleToPlayers: true
-    };
-  }
-  if (preset === 'gm') {
-    return {
-      ...base,
-      name: 'Luz GM-only',
-      darknessMode: 'subtract',
-      darkness: 0.8,
-      color: '#8b5cf6',
-      intensity: 0.65,
-      blocksGlobalIllumination: false,
-      visibleToPlayers: false
-    };
-  }
-  if (preset === 'fog') {
-    return {
-      ...base,
-      name: 'Nevoa',
-      darknessMode: 'add',
-      darkness: 0.55,
-      color: '#94a3b8',
-      intensity: 0.55,
-      blocksGlobalIllumination: false,
-      visibleToPlayers: true
-    };
-  }
-  return {
-    ...base,
-    name: 'Sala escura',
-    darknessMode: 'override',
-    darkness: 0.88,
-    color: '#030108',
-    intensity: 0.9,
-    blocksGlobalIllumination: true,
-    visibleToPlayers: true
-  };
 }
 
 function MapBackground({ map }: { map: OmniMap }) {
@@ -563,6 +275,7 @@ function SessionMapInstanceView({
   const instanceMap = instance.data;
   const width = instance.width * instance.gridSize;
   const height = instance.height * instance.gridSize;
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   if (!instanceMap) {
     return (
       <Group
@@ -571,11 +284,28 @@ function SessionMapInstanceView({
         draggable={tool === 'select' && !instance.locked}
         opacity={instance.opacity ?? 1}
         onMouseDown={(event) => {
-          if (tool !== 'select') return;
+          if (tool !== 'select' || !isPrimaryPointer(event.evt)) return;
           event.cancelBubble = true;
-          onSelect(instance.id, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
+          const additive = Boolean('shiftKey' in event.evt && event.evt.shiftKey);
+          const state = useTabletopStore.getState();
+          const keepCurrentSelection = selected && !additive && getSessionSelectionCount(state) > 1;
+          if (!keepCurrentSelection) onSelect(instance.id, additive);
         }}
-        onDragEnd={(event) => onMove(instance.id, event.target.x(), event.target.y())}
+        onDragStart={() => {
+          dragStartRef.current = { x: instance.x, y: instance.y };
+          if (!selected) onSelect(instance.id);
+        }}
+        onDragEnd={(event) => {
+          const start = dragStartRef.current || { x: instance.x, y: instance.y };
+          const deltaX = event.target.x() - start.x;
+          const deltaY = event.target.y() - start.y;
+          const state = useTabletopStore.getState();
+          const shouldMoveSelection = state.selectedMapInstanceIds.includes(instance.id)
+            && (state.selectedMapInstanceIds.length > 1 || state.selectedTokenIds.length || state.selectedObjectIds.length || state.selectedRegionIds.length);
+          if (shouldMoveSelection) state.moveSelectedSessionItems(deltaX, deltaY);
+          else onMove(instance.id, event.target.x(), event.target.y());
+          dragStartRef.current = null;
+        }}
       >
         <Rect width={width} height={height} fill="#08040f" stroke={selected ? '#60a5fa' : '#7c3aed'} strokeWidth={selected ? 3 : 1} dash={selected ? [7, 5] : undefined} />
         <Text x={12} y={12} text={instance.name} fill="#ddd6fe" fontStyle="bold" fontSize={14} />
@@ -590,20 +320,37 @@ function SessionMapInstanceView({
       draggable={tool === 'select' && !instance.locked}
       opacity={instance.opacity ?? 1}
       onMouseDown={(event) => {
-        if (tool !== 'select') return;
+        if (tool !== 'select' || !isPrimaryPointer(event.evt)) return;
         event.cancelBubble = true;
-        onSelect(instance.id, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
+        const additive = Boolean('shiftKey' in event.evt && event.evt.shiftKey);
+        const state = useTabletopStore.getState();
+        const keepCurrentSelection = selected && !additive && getSessionSelectionCount(state) > 1;
+        if (!keepCurrentSelection) onSelect(instance.id, additive);
       }}
-      onDragEnd={(event) => onMove(instance.id, event.target.x(), event.target.y())}
+      onDragStart={() => {
+        dragStartRef.current = { x: instance.x, y: instance.y };
+        if (!selected) onSelect(instance.id);
+      }}
+      onDragEnd={(event) => {
+        const start = dragStartRef.current || { x: instance.x, y: instance.y };
+        const deltaX = event.target.x() - start.x;
+        const deltaY = event.target.y() - start.y;
+        const state = useTabletopStore.getState();
+        const shouldMoveSelection = state.selectedMapInstanceIds.includes(instance.id)
+          && (state.selectedMapInstanceIds.length > 1 || state.selectedTokenIds.length || state.selectedObjectIds.length || state.selectedRegionIds.length);
+        if (shouldMoveSelection) state.moveSelectedSessionItems(deltaX, deltaY);
+        else onMove(instance.id, event.target.x(), event.target.y());
+        dragStartRef.current = null;
+      }}
     >
       <MapBackground map={instanceMap} />
       <TileLayerView layer={instanceMap.tileLayers.floor} map={instanceMap} viewMode={viewMode} />
       <TileLayerView layer={instanceMap.tileLayers.walls} map={instanceMap} wall viewMode={viewMode} />
       <TileLayerView layer={instanceMap.tileLayers.doors} map={instanceMap} door viewMode={viewMode} />
-      <SessionObjectLayer layer={instanceMap.decorationLayer} map={instanceMap} tool="select" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
-      <SessionObjectLayer layer={instanceMap.objectLayer} map={instanceMap} tool="select" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
-      <SessionObjectLayer layer={instanceMap.detailLayer} map={instanceMap} tool="select" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
-      <SessionObjectLayer layer={instanceMap.lightingLayer} map={instanceMap} tool="select" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
+      <SessionObjectLayer layer={instanceMap.decorationLayer} map={instanceMap} tool="brush" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
+      <SessionObjectLayer layer={instanceMap.objectLayer} map={instanceMap} tool="brush" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
+      <SessionObjectLayer layer={instanceMap.detailLayer} map={instanceMap} tool="brush" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
+      <SessionObjectLayer layer={instanceMap.lightingLayer} map={instanceMap} tool="brush" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
       <Rect width={width} height={height} fill="rgba(0,0,0,0.01)" stroke={selected ? '#60a5fa' : instance.locked ? 'rgba(196,181,253,0.35)' : 'rgba(139,92,246,0.28)'} strokeWidth={selected ? 3 : 1} dash={selected || instance.locked ? [7, 5] : undefined} />
       <Text x={8} y={8} text={`${instance.name}${instance.locked ? ' / travado' : ''}`} fill="#ddd6fe" fontStyle="bold" fontSize={12} />
     </Group>
@@ -653,7 +400,7 @@ function TileLayerView({
               opacity={layer.opacity}
               listening={door}
               onMouseDown={(event) => {
-                if (!door) return;
+                if (!door || !isPrimaryPointer(event.evt)) return;
                 if (tool === 'door') {
                   event.cancelBubble = true;
                   onDoorToggle?.(cell);
@@ -789,6 +536,7 @@ function SessionObjectShape({
   const width = object.width * (object.scale || 1);
   const height = object.height * (object.scale || 1);
   const canSelect = selectable && (object.interactable || object.kind === 'light' || object.kind === 'note' || object.kind === 'zone' || object.kind === 'terminal' || object.kind === 'cover');
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   return (
     <Group
@@ -796,16 +544,31 @@ function SessionObjectShape({
       x={object.x}
       y={object.y}
       rotation={object.rotation}
+      draggable={tool === 'select' && canSelect && !object.locked}
       opacity={opacity * object.opacity * (object.hiddenFromPlayers ? 0.55 : 1)}
       onMouseDown={(event) => {
-        if (tool !== 'select' || !canSelect) return;
+        if (tool !== 'select' || !canSelect || !isPrimaryPointer(event.evt)) return;
         event.cancelBubble = true;
-        onSelect(object.id, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
+        const additive = Boolean('shiftKey' in event.evt && event.evt.shiftKey);
+        const state = useTabletopStore.getState();
+        const keepCurrentSelection = selected && !additive && getSessionSelectionCount(state) > 1;
+        if (!keepCurrentSelection) onSelect(object.id, additive);
       }}
       onTouchStart={(event) => {
         if (tool !== 'select' || !canSelect) return;
         event.cancelBubble = true;
         onSelect(object.id);
+      }}
+      onDragStart={() => {
+        dragStartRef.current = { x: object.x, y: object.y };
+        if (!selected) onSelect(object.id);
+      }}
+      onDragEnd={(event) => {
+        const start = dragStartRef.current || { x: object.x, y: object.y };
+        const deltaX = event.target.x() - start.x;
+        const deltaY = event.target.y() - start.y;
+        useTabletopStore.getState().moveSelectedSessionItems(deltaX, deltaY);
+        dragStartRef.current = null;
       }}
     >
       {image ? (
@@ -825,8 +588,7 @@ function TokenLayerView({
   selectedTokenIds,
   viewMode,
   onSelect,
-  onMove,
-  onMoveSelected
+  onMove
 }: {
   map: OmniMap;
   tool: MapTool;
@@ -834,7 +596,6 @@ function TokenLayerView({
   viewMode: 'gm' | 'player-preview';
   onSelect(tokenId: string, additive?: boolean): void;
   onMove(tokenId: string, x: number, y: number): void;
-  onMoveSelected(deltaX: number, deltaY: number): void;
 }) {
   return (
     <>
@@ -850,7 +611,6 @@ function TokenLayerView({
             selectedCount={selectedTokenIds.size}
             onSelect={onSelect}
             onMove={onMove}
-            onMoveSelected={onMoveSelected}
           />
         ))}
     </>
@@ -864,8 +624,7 @@ function TokenShape({
   selected,
   selectedCount,
   onSelect,
-  onMove,
-  onMoveSelected
+  onMove
 }: {
   token: TabletopToken;
   map: OmniMap;
@@ -874,13 +633,13 @@ function TokenShape({
   selectedCount: number;
   onSelect(tokenId: string, additive?: boolean): void;
   onMove(tokenId: string, x: number, y: number): void;
-  onMoveSelected(deltaX: number, deltaY: number): void;
 }) {
   const image = useAssetImage(token.image);
   const size = map.gridSize;
   const visualSize = size * Math.max(0.5, token.size || 1);
   const tone = token.kind === 'enemy' ? '#fb7185' : token.kind === 'character' ? '#34d399' : '#8b5cf6';
   const draggable = tool === 'select' && !token.locked;
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   return (
     <Group
@@ -889,25 +648,40 @@ function TokenShape({
       draggable={draggable}
       opacity={token.hidden ? 0.45 : 1}
       onMouseDown={(event) => {
-        if (tool !== 'select') return;
+        if (tool !== 'select' || !isPrimaryPointer(event.evt)) return;
         event.cancelBubble = true;
         const additive = Boolean('shiftKey' in event.evt && event.evt.shiftKey);
-        if (!selected || additive || selectedCount <= 1) onSelect(token.id, additive);
+        const state = useTabletopStore.getState();
+        if (!selected || additive || getSessionSelectionCount(state) <= 1) onSelect(token.id, additive);
       }}
       onTouchStart={(event) => {
         if (tool !== 'select') return;
         event.cancelBubble = true;
         onSelect(token.id);
       }}
+      onDragStart={() => {
+        dragStartRef.current = { x: token.x, y: token.y };
+        if (!selected) onSelect(token.id);
+      }}
       onDragEnd={(event) => {
+        const start = dragStartRef.current || { x: token.x, y: token.y };
         const nextX = Math.round(event.target.x() / size);
         const nextY = Math.round(event.target.y() / size);
-        if (selected && selectedCount > 1) {
-          onMoveSelected(nextX - token.x, nextY - token.y);
+        const deltaX = nextX - start.x;
+        const deltaY = nextY - start.y;
+        const stateBefore = useTabletopStore.getState();
+        const before = stateBefore.map.tokens.find((entry) => entry.id === token.id);
+        const activeSelection = stateBefore.selectedTokenIds;
+        if (activeSelection.includes(token.id) && getSessionSelectionCount(stateBefore) > 1) {
+          stateBefore.moveSelectedSessionItems(deltaX * size, deltaY * size);
         } else {
           onMove(token.id, nextX, nextY);
         }
-        event.target.position({ x: token.x * size, y: token.y * size });
+        const after = useTabletopStore.getState().map.tokens.find((entry) => entry.id === token.id);
+        if (before && after && before.x === after.x && before.y === after.y) {
+          event.target.position({ x: start.x * size, y: start.y * size });
+        }
+        dragStartRef.current = null;
       }}
     >
       <Circle x={visualSize / 2} y={visualSize / 2} radius={visualSize * 0.48} fill="#130d1d" stroke={selected ? '#60a5fa' : token.auraColor || tone} strokeWidth={selected ? 4 : 2} />
@@ -1001,6 +775,7 @@ function LightingRegionShape({
   const opacity = region.darknessMode === 'override'
     ? Math.max(0.08, region.darkness * 0.42)
     : Math.max(0.06, region.intensity * 0.18);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const content = (() => {
   if (region.shape === 'circle') {
     const radius = end ? Math.max(24, Math.hypot(end.x - start.x, end.y - start.y) / 2) : 96;
@@ -1017,13 +792,28 @@ function LightingRegionShape({
     <Group
       draggable={tool === 'select'}
       onMouseDown={(event) => {
-        if (tool !== 'select') return;
+        if (tool !== 'select' || !isPrimaryPointer(event.evt)) return;
         event.cancelBubble = true;
-        onSelect(region.id, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
+        const additive = Boolean('shiftKey' in event.evt && event.evt.shiftKey);
+        const state = useTabletopStore.getState();
+        const keepCurrentSelection = selected && !additive && getSessionSelectionCount(state) > 1;
+        if (!keepCurrentSelection) onSelect(region.id, additive);
+      }}
+      onDragStart={() => {
+        dragStartRef.current = { x: 0, y: 0 };
+        if (!selected) onSelect(region.id);
       }}
       onDragEnd={(event) => {
-        onMove(event.target.x(), event.target.y());
+        const start = dragStartRef.current || { x: 0, y: 0 };
+        const deltaX = event.target.x() - start.x;
+        const deltaY = event.target.y() - start.y;
+        const state = useTabletopStore.getState();
+        const shouldMoveSelection = state.selectedRegionIds.includes(region.id)
+          && (state.selectedRegionIds.length > 1 || state.selectedTokenIds.length || state.selectedObjectIds.length || state.selectedMapInstanceIds.length);
+        if (shouldMoveSelection) state.moveSelectedSessionItems(deltaX, deltaY);
+        else onMove(deltaX, deltaY);
         event.target.position({ x: 0, y: 0 });
+        dragStartRef.current = null;
       }}
     >
       {content}
@@ -1032,19 +822,32 @@ function LightingRegionShape({
   );
 }
 
-function TemplateLayer({ map, viewMode }: { map: OmniMap; viewMode: 'gm' | 'player-preview' }) {
+function TemplateLayer({
+  map,
+  viewMode,
+  tool,
+  selectedIds
+}: {
+  map: OmniMap;
+  viewMode: 'gm' | 'player-preview';
+  tool: MapTool;
+  selectedIds: Set<string>;
+}) {
   const templates = map.areaTemplates || [];
   return (
     <>
       {templates
         .filter((template) => viewMode === 'gm' || template.visibleToPlayers !== false)
-        .map((template) => <TemplateShape key={template.id} template={template} />)}
+        .map((template) => <TemplateShape key={template.id} template={template} tool={tool} selected={selectedIds.has(template.id)} />)}
     </>
   );
 }
 
-function TemplateShape({ template }: { template: AreaTemplate }) {
+function TemplateShape({ template, tool, selected }: { template: AreaTemplate; tool: MapTool; selected: boolean }) {
   const stroke = template.color || '#67e8f9';
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const bounds = getTemplateBounds(template);
+  const shape = (() => {
   if (template.shape === 'line') {
     return <Line points={[template.x, template.y, template.x + template.width, template.y + template.height]} stroke={stroke} strokeWidth={4} opacity={0.8} listening={false} />;
   }
@@ -1056,6 +859,62 @@ function TemplateShape({ template }: { template: AreaTemplate }) {
   }
   const radius = template.radius || Math.max(template.width, template.height) / 2;
   return <Circle x={template.x} y={template.y} radius={radius} fill={stroke} opacity={template.opacity} stroke={stroke} dash={[8, 5]} listening={false} />;
+  })();
+
+  return (
+    <Group
+      draggable={tool === 'select'}
+      onMouseDown={(event) => {
+        if (tool !== 'select' || !isPrimaryPointer(event.evt)) return;
+        event.cancelBubble = true;
+        const additive = Boolean('shiftKey' in event.evt && event.evt.shiftKey);
+        const state = useTabletopStore.getState();
+        const keepCurrentSelection = selected && !additive && state.getSelectionSummary().total > 1;
+        if (!keepCurrentSelection) state.selectEntity({ type: 'template', id: template.id }, additive);
+      }}
+      onDragStart={() => {
+        dragStartRef.current = { x: 0, y: 0 };
+        if (!selected) useTabletopStore.getState().selectEntity({ type: 'template', id: template.id });
+      }}
+      onDragEnd={(event) => {
+        const start = dragStartRef.current || { x: 0, y: 0 };
+        useTabletopStore.getState().moveSelectedSessionItems(event.target.x() - start.x, event.target.y() - start.y);
+        event.target.position({ x: 0, y: 0 });
+        dragStartRef.current = null;
+      }}
+    >
+      {shape}
+      <Rect x={bounds.x} y={bounds.y} width={bounds.width} height={bounds.height} fill="rgba(255,255,255,0.01)" opacity={0.01} />
+      {selected ? <Rect x={bounds.x - 4} y={bounds.y - 4} width={bounds.width + 8} height={bounds.height + 8} stroke="#60a5fa" strokeWidth={2} dash={[6, 4]} listening={false} /> : null}
+    </Group>
+  );
+}
+
+function getTemplateBounds(template: AreaTemplate) {
+  if (template.radius) {
+    return {
+      x: template.x - template.radius,
+      y: template.y - template.radius,
+      width: template.radius * 2,
+      height: template.radius * 2
+    };
+  }
+  if (template.shape === 'line') {
+    const x = Math.min(template.x, template.x + template.width);
+    const y = Math.min(template.y, template.y + template.height);
+    return {
+      x,
+      y,
+      width: Math.max(8, Math.abs(template.width)),
+      height: Math.max(8, Math.abs(template.height))
+    };
+  }
+  return {
+    x: template.x - Math.abs(template.width) / 2,
+    y: template.y - Math.abs(template.height) / 2,
+    width: Math.max(8, Math.abs(template.width)),
+    height: Math.max(8, Math.abs(template.height))
+  };
 }
 
 function SessionFogOverlay({
@@ -1186,12 +1045,6 @@ function pointInPolygon(point: { x: number; y: number }, polygon: Array<{ x: num
     if (intersects) inside = !inside;
   }
   return inside;
-}
-
-function SelectionBox({ box }: { box: { x: number; y: number; width: number; height: number } }) {
-  const x = Math.min(box.x, box.x + box.width);
-  const y = Math.min(box.y, box.y + box.height);
-  return <Rect x={x} y={y} width={Math.abs(box.width)} height={Math.abs(box.height)} fill="#60a5fa" opacity={0.14} stroke="#93c5fd" strokeWidth={1} dash={[6, 4]} listening={false} />;
 }
 
 function RulerView({ map, ruler }: { map: OmniMap; ruler: { start: { x: number; y: number }; end: { x: number; y: number } } }) {
@@ -1350,26 +1203,6 @@ function useAssetImage(src?: string) {
   return image;
 }
 
-function getStagePointer(stage: Konva.Stage | null) {
-  const pointer = stage?.getPointerPosition();
-  if (!pointer) return null;
-  return { x: pointer.x, y: pointer.y };
-}
-
-function screenToWorld(pointer: { x: number; y: number }, camera: { x: number; y: number }, zoom: number) {
-  return {
-    x: (pointer.x - camera.x) / zoom,
-    y: (pointer.y - camera.y) / zoom
-  };
-}
-
-function pointerToCell(pointer: { x: number; y: number }, map: OmniMap) {
-  const x = Math.floor(pointer.x / map.gridSize);
-  const y = Math.floor(pointer.y / map.gridSize);
-  if (!isInsideCell(map, x, y)) return null;
-  return { x, y };
-}
-
 function getCellRect(map: OmniMap, cell: TileCell) {
   const footprint = resolveFootprint(cell.footprint, cell.rotation || 0);
   return {
@@ -1416,8 +1249,22 @@ function isInsideCell(map: OmniMap, x: number, y: number) {
   return x >= 0 && y >= 0 && x < map.width && y < map.height;
 }
 
-function isStageTarget(node: Konva.Node) {
-  return node.getClassName() === 'Stage' || node.name() === 'session-background';
+function isPrimaryPointer(event: MouseEvent | TouchEvent | PointerEvent) {
+  return !('button' in event) || event.button === 0;
+}
+
+function getSessionSelectionCount(state: {
+  selectedTokenIds: string[];
+  selectedObjectIds: string[];
+  selectedMapInstanceIds: string[];
+  selectedRegionIds: string[];
+  selectedTileCells: unknown[];
+}) {
+  return state.selectedTokenIds.length
+    + state.selectedObjectIds.length
+    + state.selectedMapInstanceIds.length
+    + state.selectedRegionIds.length
+    + state.selectedTileCells.length;
 }
 
 function isValidSessionMapInstance(instance: SessionMapInstance) {
@@ -1455,52 +1302,4 @@ function isValidLightingRegion(region: LightingRegion) {
     && region.points.length
     && region.points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
   );
-}
-
-function getEventButton(event: MouseEvent | TouchEvent | PointerEvent) {
-  return 'button' in event ? event.button : 0;
-}
-
-function isAdditiveEvent(event: MouseEvent | TouchEvent | PointerEvent) {
-  return 'shiftKey' in event && event.shiftKey;
-}
-
-function capturePointer(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
-  if (!('pointerId' in event.evt)) return;
-  const container = event.target.getStage()?.container();
-  if (!container?.setPointerCapture) return;
-  try {
-    container.setPointerCapture(event.evt.pointerId);
-  } catch {
-    // The browser may already have released this pointer; panning still works without capture.
-  }
-}
-
-function releasePointer(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
-  if (!('pointerId' in event.evt)) return;
-  const container = event.target.getStage()?.container();
-  if (!container?.releasePointerCapture) return;
-  try {
-    container.releasePointerCapture(event.evt.pointerId);
-  } catch {
-    // Pointer capture is best-effort here.
-  }
-}
-
-function isSessionPlaceTool(tool: MapTool) {
-  return tool === 'object' || tool === 'cover' || tool === 'terminal' || tool === 'light' || tool === 'zone' || tool === 'note';
-}
-
-function arrowDelta(key: string, step: number) {
-  if (key === 'ArrowLeft') return { x: -step, y: 0 };
-  if (key === 'ArrowRight') return { x: step, y: 0 };
-  if (key === 'ArrowUp') return { x: 0, y: -step };
-  return { x: 0, y: step };
-}
-
-function isEditableTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  if (!element) return false;
-  const tag = element.tagName?.toLowerCase();
-  return tag === 'input' || tag === 'textarea' || tag === 'select' || element.isContentEditable;
 }
