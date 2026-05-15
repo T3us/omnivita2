@@ -1,11 +1,16 @@
 import { DEFAULT_TILESETS, getAsset, normalizeAsset } from './assets';
 import type {
+  AreaTemplate,
+  AssetPack,
   FogLayer,
+  LightingRegion,
   MapLayerKey,
   MapObject,
   MapPrefab,
   ObjectLayer,
   OmniMap,
+  SessionLightingState,
+  SessionMapInstance,
   TabletopMode,
   TabletopToken,
   TileCell,
@@ -79,6 +84,17 @@ function createFogLayer(): FogLayer {
   };
 }
 
+function createDefaultSessionLighting(): SessionLightingState {
+  return {
+    globalIllumination: true,
+    darkness: 0,
+    ambientColor: '#d8e6ff',
+    ambientIntensity: 1,
+    playerVisible: false,
+    regions: []
+  };
+}
+
 export function createBlankMap(name = 'Novo mapa', width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, gridSize = DEFAULT_GRID): OmniMap {
   return {
     id: createId('map'),
@@ -103,7 +119,13 @@ export function createBlankMap(name = 'Novo mapa', width = DEFAULT_WIDTH, height
     notesLayer: createObjectLayer('notes', 'Notas'),
     fogLayer: createFogLayer(),
     tokens: [],
-    prefabs: []
+    prefabs: [],
+    metersPerCell: 1.5,
+    lightingRegions: [],
+    sessionLighting: createDefaultSessionLighting(),
+    areaTemplates: [],
+    assetPacks: [],
+    sessionMapInstances: []
   };
 }
 
@@ -134,7 +156,13 @@ export function normalizeMap(input: Partial<OmniMap> | null | undefined): OmniMa
     notesLayer: normalizeObjectLayer(input?.notesLayer, base.notesLayer),
     fogLayer: normalizeFogLayer(input?.fogLayer, base.fogLayer),
     tokens: Array.isArray(input?.tokens) ? input.tokens.map(normalizeToken).filter(Boolean) as TabletopToken[] : [],
-    prefabs: Array.isArray(input?.prefabs) ? input.prefabs.map(normalizePrefab).filter(Boolean) as MapPrefab[] : []
+    prefabs: Array.isArray(input?.prefabs) ? input.prefabs.map(normalizePrefab).filter(Boolean) as MapPrefab[] : [],
+    metersPerCell: clampNumber(input?.metersPerCell, 0.5, 10, 1.5),
+    lightingRegions: Array.isArray(input?.lightingRegions) ? input.lightingRegions.map(normalizeLightingRegion).filter(Boolean) as LightingRegion[] : [],
+    sessionLighting: normalizeSessionLighting(input?.sessionLighting),
+    areaTemplates: Array.isArray(input?.areaTemplates) ? input.areaTemplates.map(normalizeAreaTemplate).filter(Boolean) as AreaTemplate[] : [],
+    assetPacks: Array.isArray(input?.assetPacks) ? input.assetPacks as AssetPack[] : [],
+    sessionMapInstances: Array.isArray(input?.sessionMapInstances) ? input.sessionMapInstances.map(normalizeSessionMapInstance).filter(Boolean) as SessionMapInstance[] : []
   };
 
   return next;
@@ -418,6 +446,86 @@ function normalizeToken(token: Partial<TabletopToken>) {
     hidden: Boolean(token.hidden),
     visibleToPlayers: token.visibleToPlayers !== false,
     locked: Boolean(token.locked)
+  };
+}
+
+function normalizeSessionLighting(lighting: Partial<SessionLightingState> | undefined): SessionLightingState {
+  const fallback = createDefaultSessionLighting();
+  return {
+    globalIllumination: Boolean(lighting?.globalIllumination),
+    darkness: clampNumber(lighting?.darkness, 0, 1, fallback.darkness),
+    ambientColor: String(lighting?.ambientColor || fallback.ambientColor),
+    ambientIntensity: clampNumber(lighting?.ambientIntensity, 0, 2, fallback.ambientIntensity),
+    playerVisible: Boolean(lighting?.playerVisible),
+    regions: Array.isArray(lighting?.regions) ? lighting.regions.map(normalizeLightingRegion).filter(Boolean) as LightingRegion[] : []
+  };
+}
+
+function normalizeLightingRegion(region: Partial<LightingRegion>) {
+  if (!region?.id) return null;
+  return {
+    id: String(region.id),
+    name: String(region.name || 'Regiao de luz'),
+    shape: region.shape === 'circle' || region.shape === 'polygon' ? region.shape : 'rect',
+    points: Array.isArray(region.points)
+      ? region.points.map((point) => ({ x: Number(point.x || 0), y: Number(point.y || 0) }))
+      : [],
+    darknessMode: region.darknessMode === 'subtract' || region.darknessMode === 'override' ? region.darknessMode : 'add',
+    darkness: clampNumber(region.darkness, 0, 1, 0.4),
+    color: String(region.color || '#111827'),
+    intensity: clampNumber(region.intensity, 0, 2, 0.8),
+    blocksGlobalIllumination: Boolean(region.blocksGlobalIllumination),
+    visibleToPlayers: region.visibleToPlayers !== false,
+    visibleToGM: region.visibleToGM !== false,
+    affectsVision: region.affectsVision !== false,
+    affectsFog: region.affectsFog !== false,
+    type: region.type,
+    note: region.note ? String(region.note) : undefined
+  };
+}
+
+function normalizeAreaTemplate(template: Partial<AreaTemplate>) {
+  if (!template?.id) return null;
+  const shape = ['circle', 'cone', 'line', 'rect', 'aura', 'zone'].includes(String(template.shape))
+    ? template.shape as AreaTemplate['shape']
+    : 'circle';
+  return {
+    id: String(template.id),
+    name: String(template.name || 'Template'),
+    shape,
+    x: Number(template.x || 0),
+    y: Number(template.y || 0),
+    width: clampNumber(template.width, 1, 4000, 96),
+    height: clampNumber(template.height, 1, 4000, 96),
+    radius: template.radius === undefined ? undefined : clampNumber(template.radius, 1, 4000, 96),
+    angle: template.angle === undefined ? undefined : Number(template.angle || 0),
+    color: String(template.color || '#8b5cf6'),
+    opacity: clampNumber(template.opacity, 0, 1, 0.28),
+    visibleToPlayers: template.visibleToPlayers !== false,
+    createdAt: template.createdAt ? String(template.createdAt) : undefined
+  };
+}
+
+function normalizeSessionMapInstance(instance: Partial<SessionMapInstance>) {
+  if (!instance?.id) return null;
+  const data = instance.data ? normalizeMap(instance.data) : undefined;
+  return {
+    id: String(instance.id),
+    sourceMapId: String(instance.sourceMapId || data?.id || instance.id),
+    sourceMapName: instance.sourceMapName ? String(instance.sourceMapName) : data?.name,
+    name: String(instance.name || data?.name || 'Mapa da sessao'),
+    x: Number(instance.x || 0),
+    y: Number(instance.y || 0),
+    width: Number(instance.width || data?.width || 1),
+    height: Number(instance.height || data?.height || 1),
+    gridSize: Number(instance.gridSize || data?.gridSize || 32),
+    rotation: normalizeRotation(Number(instance.rotation || 0)),
+    locked: Boolean(instance.locked),
+    visibleToPlayers: instance.visibleToPlayers !== false,
+    opacity: clampNumber(instance.opacity, 0, 1, 1),
+    zIndex: Number(instance.zIndex || 0),
+    attachedObjectIds: Array.isArray(instance.attachedObjectIds) ? instance.attachedObjectIds.map(String) : [],
+    data
   };
 }
 

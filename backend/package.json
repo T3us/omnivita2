@@ -8,6 +8,8 @@
     "dev": "node --watch server.mjs",
     "start": "node server.mjs",
     "migrate": "node scripts/apply-migrations.mjs",
+    "backup:all": "node scripts/backup-all.mjs",
+    "restore:backup": "node scripts/restore-backup.mjs",
     "restore:fresh": "npm run migrate && npm run seed:manual && npm run import:curated",
     "export:live": "node scripts/export-live-data.mjs",
     "import:live": "node scripts/import-live-export.mjs",

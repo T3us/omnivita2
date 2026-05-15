@@ -12,7 +12,12 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port,
-      strictPort: false,
+      strictPort: true,
+      allowedHosts: [
+        'localhost',
+        '127.0.0.1',
+        '.trycloudflare.com'
+      ],
       proxy: {
         '/api': {
           target: apiTarget,

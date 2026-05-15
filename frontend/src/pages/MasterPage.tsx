@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import type { ChangeEvent, ReactNode } from 'react';
+import type { ChangeEvent, ReactNode, RefObject } from 'react';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
@@ -35,9 +35,10 @@ import { downloadJson, readJsonFile } from '../utils/json';
 const TabletopPage = lazy(() => import('../components/tabletop/TabletopPage').then((module) => ({ default: module.TabletopPage })));
 
 type QuickFilter = 'all' | 'alert' | 'instability' | 'entities' | 'absent' | 'focus';
-type MasterTab = 'session' | 'combat' | 'players' | 'omnivita' | 'tabletop' | 'scenarios' | 'libraries' | 'editor';
+type MasterTab = 'session' | 'combat' | 'players' | 'omnivita' | 'tabletop' | 'backups' | 'scenarios' | 'libraries' | 'editor';
 type CombatantDraft = Combatant & Record<string, unknown>;
 type MasterLibraryKind = 'npcs' | 'locations' | 'items' | 'clues' | 'templates';
+type BackupScope = 'all' | 'characters' | 'maps' | 'session-boards' | 'custom-assets' | 'settings';
 
 interface MasterLogEntry {
   id?: string;
@@ -147,6 +148,7 @@ const tabs: Array<{ id: MasterTab; label: string }> = [
   { id: 'players', label: 'Players' },
   { id: 'omnivita', label: 'OmniVita' },
   { id: 'tabletop', label: 'Mesa' },
+  { id: 'backups', label: 'Backups' },
   { id: 'scenarios', label: 'Cenarios' },
   { id: 'libraries', label: 'Bibliotecas' },
   { id: 'editor', label: 'Edicao' }
@@ -157,10 +159,13 @@ export function MasterPage() {
   const queryClient = useQueryClient();
   const { session, logout } = useAuth();
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const backupInputRef = useRef<HTMLInputElement | null>(null);
   const [activeTab, setActiveTab] = useState<MasterTab>('session');
   const [search, setSearch] = useState('');
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
   const [importMessage, setImportMessage] = useState('');
+  const [backupMessage, setBackupMessage] = useState('');
+  const [backupBusy, setBackupBusy] = useState(false);
   const [optimizeMessage, setOptimizeMessage] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
   const [companionDialogSignal, setCompanionDialogSignal] = useState(0);
@@ -615,14 +620,72 @@ export function MasterPage() {
     optimizeImagesMutation.mutate(characters);
   }
 
-  const headerStatus = optimizeImagesMutation.isPending
+  async function handleBackupExport(scope: BackupScope) {
+    try {
+      setBackupBusy(true);
+      setBackupMessage('Gerando backup...');
+      const result = await api.exportBackup(scope);
+      downloadBlob(result.filename, result.blob);
+      setBackupMessage(scope === 'all' ? 'Backup completo baixado.' : 'Backup parcial baixado.');
+    } catch (error) {
+      setBackupMessage(error instanceof Error ? error.message : 'Falha ao exportar backup.');
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function handleLatestBackupDownload() {
+    try {
+      setBackupBusy(true);
+      setBackupMessage('Baixando backup mais recente...');
+      const result = await api.downloadLatestBackup();
+      downloadBlob(result.filename, result.blob);
+      setBackupMessage('Backup automatico mais recente baixado.');
+    } catch (error) {
+      setBackupMessage(error instanceof Error ? error.message : 'Falha ao baixar backup recente.');
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function handleBackupImport(file: File | undefined) {
+    if (!file) return;
+    try {
+      setBackupBusy(true);
+      setBackupMessage('Lendo backup...');
+      const payload = await readJsonFile(file);
+      const preview = await api.importBackup(payload, false);
+      const summary = preview.summary;
+      const confirmed = window.confirm(
+        `Importar backup?\n\nFichas: ${summary.characters}\nMapas: ${summary.maps}\nSessoes: ${summary.sessionBoards}\nAssets: ${summary.customAssets}\n\nIsso atualiza/cria registros do arquivo, sem apagar dados existentes.`
+      );
+      if (!confirmed) {
+        setBackupMessage('Importacao de backup cancelada.');
+        return;
+      }
+      const result = await api.importBackup(payload, true);
+      setBackupMessage(result.message || 'Backup importado.');
+      queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
+      queryClient.invalidateQueries({ queryKey: ['maps'] });
+      queryClient.invalidateQueries({ queryKey: ['session-boards'] });
+    } catch (error) {
+      setBackupMessage(error instanceof Error ? error.message : 'Falha ao importar backup.');
+    } finally {
+      setBackupBusy(false);
+      if (backupInputRef.current) backupInputRef.current.value = '';
+    }
+  }
+
+  const headerStatus = backupBusy
+    ? 'Backup em andamento'
+    : optimizeImagesMutation.isPending
     ? optimizeMessage || 'Otimizando imagens'
     : importMutation.isPending
       ? 'Importando campanha'
       : updateMutation.isPending
         ? 'Salvando'
         : 'Atualizado ao vivo';
-  const headerStatusTone = optimizeImagesMutation.isPending || importMutation.isPending || updateMutation.isPending ? 'warn' : 'good';
+  const headerStatusTone = backupBusy || optimizeImagesMutation.isPending || importMutation.isPending || updateMutation.isPending ? 'warn' : 'good';
 
   return (
     <AppLayout
@@ -649,6 +712,7 @@ export function MasterPage() {
       {query.isLoading ? <Card>Carregando dados da campanha...</Card> : null}
       {query.error ? <Card className="border-coral/40 text-coral">{query.error instanceof Error ? query.error.message : 'Erro ao carregar.'}</Card> : null}
       {importMessage ? <Card className={importMessage.startsWith('Importado') ? 'border-aqua/40 text-aqua' : 'border-amber/40 text-amber'}>{importMessage}</Card> : null}
+      {backupMessage && activeTab !== 'backups' ? <Card className={backupMessage.includes('Falha') ? 'border-coral/40 text-coral' : 'border-aqua/40 text-aqua'}>{backupMessage}</Card> : null}
 
       <section className="rounded-lg border border-line bg-panel/90 p-2">
         <div className="flex flex-wrap gap-2">
@@ -740,6 +804,16 @@ export function MasterPage() {
             />
           </Suspense>
         ) : null}
+        {activeTab === 'backups' ? (
+          <BackupPanel
+            busy={backupBusy}
+            message={backupMessage}
+            inputRef={backupInputRef}
+            onExport={handleBackupExport}
+            onImport={handleBackupImport}
+            onDownloadLatest={handleLatestBackupDownload}
+          />
+        ) : null}
         {activeTab === 'scenarios' ? (
           <ScenariosPanel
             scenarios={scenarios}
@@ -809,6 +883,70 @@ function MasterSidebar({ username, onLogout }: { username: string; onLogout(): v
         </a>
         <Button type="button" onClick={onLogout}>Sair</Button>
       </div>
+    </div>
+  );
+}
+
+function BackupPanel({
+  busy,
+  message,
+  inputRef,
+  onExport,
+  onImport,
+  onDownloadLatest
+}: {
+  busy: boolean;
+  message: string;
+  inputRef: RefObject<HTMLInputElement>;
+  onExport(scope: BackupScope): void;
+  onImport(file: File | undefined): void;
+  onDownloadLatest(): void;
+}) {
+  const exportButtons: Array<{ scope: BackupScope; label: string }> = [
+    { scope: 'all', label: 'Exportar tudo' },
+    { scope: 'characters', label: 'Exportar fichas' },
+    { scope: 'maps', label: 'Exportar mapas' },
+    { scope: 'session-boards', label: 'Exportar sessoes' },
+    { scope: 'custom-assets', label: 'Exportar assets customizados' }
+  ];
+
+  return (
+    <div className="grid gap-4">
+      <Card className="border-amber/35">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-black">Backups</h2>
+            <p className="mt-1 text-sm text-textMuted">Antes de grandes atualizacoes, exporte um backup.</p>
+          </div>
+          {message ? <Badge tone={message.includes('Falha') ? 'danger' : 'accent'}>{message}</Badge> : null}
+        </div>
+        <div className="mt-4 grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))]">
+          {exportButtons.map((entry) => (
+            <Button key={entry.scope} type="button" disabled={busy} onClick={() => onExport(entry.scope)}>
+              {entry.label}
+            </Button>
+          ))}
+          <Button type="button" disabled={busy} onClick={() => inputRef.current?.click()}>Importar backup</Button>
+          <Button type="button" disabled={busy} onClick={onDownloadLatest}>Baixar backup automatico mais recente</Button>
+        </div>
+        <input
+          ref={inputRef}
+          className="hidden"
+          type="file"
+          accept="application/json,.json"
+          onChange={(event) => onImport(event.target.files?.[0])}
+        />
+      </Card>
+
+      <Card>
+        <h3 className="text-lg font-black">O que entra no backup completo</h3>
+        <div className="mt-3 grid gap-2 text-sm text-textMuted md:grid-cols-2">
+          <p>users com hash de senha, nunca senha em texto puro</p>
+          <p>characters e combat_state</p>
+          <p>master_data, mapas e session_boards</p>
+          <p>custom_assets e configuracoes do tabletop</p>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -6800,6 +6938,17 @@ function diffMasterSnapshots(previous: Map<string, MasterSnapshotEntry>, next: M
 
 function waitForBrowser() {
   return new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+}
+
+function downloadBlob(fileName: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function createCharacterTransferEnvelope(character: CharacterSheet) {

@@ -48,12 +48,14 @@ export function MapToolbar({
   saving,
   onNew,
   onSave,
-  onDelete
+  onDelete,
+  onModeChange
 }: {
   saving: boolean;
   onNew(): void;
   onSave(): void;
   onDelete(): void;
+  onModeChange?(mode: TabletopMode): void;
 }) {
   const map = useTabletopStore((state) => state.map);
   const tool = useTabletopStore((state) => state.tool);
@@ -191,7 +193,7 @@ export function MapToolbar({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <ModeButton mode="build" current={map.mode} onClick={setMode}>Construcao</ModeButton>
-          <ModeButton mode="session" current={map.mode} onClick={setMode}>Sessao</ModeButton>
+          <ModeButton mode="session" current={map.mode} onClick={onModeChange || setMode}>Sessao</ModeButton>
           <Badge tone={dirty ? 'warn' : 'good'}>{dirty ? 'Alteracoes locais' : 'Salvo'}</Badge>
         </div>
         <div className="flex flex-wrap gap-2">

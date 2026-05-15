@@ -1,13 +1,16 @@
 import { getRuntimeApiBaseUrl } from './runtime';
 import type {
   AuthSession,
+  BackupImportResult,
   BootstrapPayload,
   CharacterSheet,
   CombatState,
   MasterData,
   MapSummary,
   OmniMap,
-  OmnivitaCodeEvaluationResponse
+  OmnivitaCodeEvaluationResponse,
+  SessionBoard,
+  SessionBoardSummary
 } from './types';
 import { clearStoredSession, readStoredSession } from '../auth/session';
 
@@ -16,6 +19,13 @@ interface RequestOptions {
   auth?: boolean;
   body?: unknown;
   timeoutMs?: number;
+}
+
+type BackupScope = 'all' | 'characters' | 'maps' | 'session-boards' | 'custom-assets' | 'settings';
+
+interface DownloadResult {
+  blob: Blob;
+  filename: string;
 }
 
 function friendlyError(message: string, status = 0): string {
@@ -92,6 +102,40 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   return payload as T;
+}
+
+async function apiDownload(path: string, fallbackFilename: string): Promise<DownloadResult> {
+  const baseUrl = getRuntimeApiBaseUrl();
+  const headers: Record<string, string> = {};
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, { headers });
+  } catch (error) {
+    const raw = error instanceof Error ? error.message : 'Failed to fetch';
+    throw new Error(friendlyError(raw));
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text;
+    try {
+      const payload = JSON.parse(text) as { message?: string };
+      message = payload.message || text;
+    } catch {
+      // Text responses are fine here.
+    }
+    throw new Error(friendlyError(message, response.status));
+  }
+
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  return {
+    blob: await response.blob(),
+    filename: match?.[1] || fallbackFilename
+  };
 }
 
 export const api = {
@@ -179,6 +223,44 @@ export const api = {
   deleteMap(mapId: string) {
     return apiRequest<{ ok: boolean }>(`/api/maps/${encodeURIComponent(mapId)}`, {
       method: 'DELETE'
+    });
+  },
+  listSessionBoards() {
+    return apiRequest<{ boards: SessionBoardSummary[] }>('/api/session-boards');
+  },
+  getSessionBoard(boardId: string) {
+    return apiRequest<{ board: SessionBoard }>(`/api/session-boards/${encodeURIComponent(boardId)}`);
+  },
+  createSessionBoard(board: SessionBoard) {
+    return apiRequest<{ board: SessionBoard }>('/api/session-boards', {
+      method: 'POST',
+      body: { board },
+      timeoutMs: 30000
+    });
+  },
+  updateSessionBoard(boardId: string, board: SessionBoard) {
+    return apiRequest<{ board: SessionBoard }>(`/api/session-boards/${encodeURIComponent(boardId)}`, {
+      method: 'PUT',
+      body: { board },
+      timeoutMs: 30000
+    });
+  },
+  deleteSessionBoard(boardId: string) {
+    return apiRequest<{ ok: boolean }>(`/api/session-boards/${encodeURIComponent(boardId)}`, {
+      method: 'DELETE'
+    });
+  },
+  exportBackup(scope: BackupScope = 'all') {
+    return apiDownload(`/api/backups/export?scope=${encodeURIComponent(scope)}`, 'omnivita-backup.json');
+  },
+  downloadLatestBackup() {
+    return apiDownload('/api/backups/latest', 'omnivita-backup-latest.json');
+  },
+  importBackup(backup: unknown, confirm = false) {
+    return apiRequest<BackupImportResult>('/api/backups/import', {
+      method: 'POST',
+      body: { backup, confirm },
+      timeoutMs: 60000
     });
   }
 };

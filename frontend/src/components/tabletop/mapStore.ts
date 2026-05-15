@@ -12,15 +12,19 @@ import {
   setTileCell
 } from './mapFactory';
 import type {
+  AreaTemplate,
   AssetDefinition,
   AvailableTabletopToken,
   EraseMode,
+  LightingRegion,
   MapLayerKey,
   MapObject,
   MapPrefab,
   MapTool,
   OmniMap,
   SelectedTileCell,
+  SessionLightingState,
+  SessionMapInstance,
   SnapMode,
   TabletopMode,
   TabletopToken,
@@ -35,6 +39,8 @@ interface TabletopStore {
   selectedObjectId: string;
   selectedObjectIds: string[];
   selectedTileCells: SelectedTileCell[];
+  selectedMapInstanceIds: string[];
+  selectedRegionIds: string[];
   selectedTokenId: string;
   selectedTokenIds: string[];
   placementRotation: number;
@@ -52,12 +58,13 @@ interface TabletopStore {
   sessionFogEnabled: boolean;
   sessionIgnoreCollision: boolean;
   sessionGlobalDarkness: number;
+  sessionRegionPreset: 'light' | 'dark' | 'gm' | 'fog' | null;
   historyPast: OmniMap[];
   historyFuture: OmniMap[];
   dirty: boolean;
   setMap(map: Partial<OmniMap>): void;
   newMap(name: string, width: number, height: number, gridSize: number): void;
-  setMapMeta(patch: Pick<OmniMap, 'name' | 'width' | 'height' | 'gridSize'>): void;
+  setMapMeta(patch: Partial<Pick<OmniMap, 'name' | 'width' | 'height' | 'gridSize' | 'metersPerCell'>>): void;
   setMode(mode: TabletopMode): void;
   setTool(tool: MapTool): void;
   setActiveLayer(layer: MapLayerKey): void;
@@ -129,6 +136,21 @@ interface TabletopStore {
   setSessionFogEnabled(value: boolean): void;
   setSessionIgnoreCollision(value: boolean): void;
   setSessionGlobalDarkness(value: number): void;
+  setSessionRegionPreset(preset: TabletopStore['sessionRegionPreset']): void;
+  updateSessionLighting(patch: Partial<SessionLightingState>): void;
+  addLightingRegion(region: LightingRegion): void;
+  updateLightingRegion(regionId: string, patch: Partial<LightingRegion>): void;
+  removeLightingRegion(regionId: string): void;
+  selectLightingRegion(regionId: string, additive?: boolean): void;
+  moveSelectedLightingRegions(deltaX: number, deltaY: number): void;
+  removeSelectedLightingRegions(): void;
+  addAreaTemplate(template: AreaTemplate): void;
+  addSessionMapInstance(sourceMap: OmniMap, x?: number, y?: number): void;
+  updateSessionMapInstance(instanceId: string, patch: Partial<SessionMapInstance>): void;
+  removeSessionMapInstance(instanceId: string): void;
+  duplicateSessionMapInstance(instanceId: string): void;
+  selectMapInstance(instanceId: string, additive?: boolean): void;
+  moveSelectedMapInstances(deltaX: number, deltaY: number): void;
   toggleDoorAt(x: number, y: number): void;
   setDoorStateAt(x: number, y: number, state: NonNullable<TileCell['doorState']>): void;
   setLayerVisibility(layer: MapLayerKey, visible: boolean): void;
@@ -137,6 +159,8 @@ interface TabletopStore {
   toggleActiveLayerLock(): void;
   revealFogCell(x: number, y: number): void;
   hideFogCell(x: number, y: number): void;
+  revealAllFog(): void;
+  hideAllFog(): void;
 }
 
 const OBJECT_LAYER_ORDER: MapLayerKey[] = ['decoration', 'objects', 'details', 'lighting', 'mechanics', 'notes'];
@@ -148,6 +172,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   selectedObjectId: '',
   selectedObjectIds: [],
   selectedTileCells: [],
+  selectedMapInstanceIds: [],
+  selectedRegionIds: [],
   selectedTokenId: '',
   selectedTokenIds: [],
   placementRotation: 0,
@@ -162,22 +188,27 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   soloLayer: null,
   sessionViewMode: 'gm',
   sessionDynamicVision: true,
-  sessionFogEnabled: true,
+  sessionFogEnabled: false,
   sessionIgnoreCollision: false,
-  sessionGlobalDarkness: 0.46,
+  sessionGlobalDarkness: 0,
+  sessionRegionPreset: null,
   historyPast: [],
   historyFuture: [],
   dirty: false,
 
   setMap(map) {
+    const normalized = normalizeMap(map);
     set({
-      map: normalizeMap(map),
+      map: normalized,
       selectedObjectId: '',
       selectedObjectIds: [],
       selectedTileCells: [],
+      selectedMapInstanceIds: [],
+      selectedRegionIds: [],
       selectedTokenId: '',
       selectedTokenIds: [],
       soloLayer: null,
+      sessionGlobalDarkness: normalized.sessionLighting?.darkness ?? get().sessionGlobalDarkness,
       historyPast: [],
       historyFuture: [],
       dirty: false
@@ -191,6 +222,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       selectedObjectId: '',
       selectedObjectIds: [],
       selectedTileCells: [],
+      selectedMapInstanceIds: [],
+      selectedRegionIds: [],
       selectedTokenId: '',
       selectedTokenIds: [],
       soloLayer: null,
@@ -209,7 +242,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   },
 
   setMode(mode) {
-    set((state) => ({ map: { ...state.map, mode }, tool: mode === 'build' ? state.tool : 'select', selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [], ...pushHistory(state), dirty: true }));
+    set((state) => ({ map: { ...state.map, mode }, tool: mode === 'build' ? state.tool : 'select', selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedTokenId: '', selectedTokenIds: [], ...pushHistory(state), dirty: true }));
   },
 
   setTool(tool) {
@@ -625,6 +658,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedObjectId: selectedObjectIds[selectedObjectIds.length - 1] || '',
         selectedObjectIds,
         selectedTileCells: [],
+        selectedMapInstanceIds: [],
+        selectedRegionIds: [],
         selectedTokenId: '',
         selectedTokenIds: []
       };
@@ -639,6 +674,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedObjectId: selectedObjectIds[selectedObjectIds.length - 1] || '',
         selectedObjectIds,
         selectedTileCells: [],
+        selectedMapInstanceIds: [],
+        selectedRegionIds: [],
         selectedTokenId: '',
         selectedTokenIds: []
       };
@@ -686,25 +723,35 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         .filter((object) => rectsIntersect({ x: object.x, y: object.y, width: object.width * (object.scale || 1), height: object.height * (object.scale || 1) }, area))
         .map((object) => object.id);
       const doors = getSelectableTileCellsInRect(state.map, area).filter((cell) => cell.layer === 'doors');
+      const mapInstanceIds = (state.map.sessionMapInstances || [])
+        .filter((instance) => rectsIntersect(getMapInstanceBounds(instance), area))
+        .map((instance) => instance.id);
       const selectedTokenIds = additive ? uniqueList([...state.selectedTokenIds, ...tokenIds]) : uniqueList(tokenIds);
       const selectedObjectIds = additive ? uniqueList([...state.selectedObjectIds, ...objectIds]) : uniqueList(objectIds);
       const selectedTileCells = additive ? uniqueTileCells([...state.selectedTileCells, ...doors]) : doors;
+      const selectedMapInstanceIds = additive ? uniqueList([...state.selectedMapInstanceIds, ...mapInstanceIds]) : uniqueList(mapInstanceIds);
+      const regionIds = (state.map.sessionLighting?.regions || state.map.lightingRegions || [])
+        .filter((region) => rectsIntersect(getLightingRegionBounds(region), area))
+        .map((region) => region.id);
+      const selectedRegionIds = additive ? uniqueList([...state.selectedRegionIds, ...regionIds]) : uniqueList(regionIds);
       return {
         selectedTokenId: selectedTokenIds[selectedTokenIds.length - 1] || '',
         selectedTokenIds,
         selectedObjectId: selectedObjectIds[selectedObjectIds.length - 1] || '',
         selectedObjectIds,
+        selectedMapInstanceIds,
+        selectedRegionIds,
         selectedTileCells
       };
     });
   },
 
   clearObjectSelection() {
-    set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [] });
+    set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedTokenId: '', selectedTokenIds: [] });
   },
 
   clearSessionSelection() {
-    set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedTokenId: '', selectedTokenIds: [] });
+    set({ selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedTokenId: '', selectedTokenIds: [] });
   },
 
   updateSelectedTiles(patch) {
@@ -1075,18 +1122,20 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         peMax: undefined,
         pdCurrent: undefined,
         pdMax: undefined,
-        x: Math.max(0, Math.min(next.width - 1, Math.round(x))),
-        y: Math.max(0, Math.min(next.height - 1, Math.round(y))),
-        visibleToPlayers: true,
-        locked: false,
-        hidden: false,
-        size: 1,
-        visionEnabled: true,
-        visionRadius: 6,
-        dimVisionRadius: 8,
-        brightVisionRadius: 4,
-        lightRadius: 0,
-        statusMarkers: []
+        x: Math.round(x),
+        y: Math.round(y),
+        visibleToPlayers: source.visibleToPlayers !== false,
+        locked: Boolean(source.locked),
+        hidden: Boolean(source.hidden),
+        status: source.status,
+        size: source.size || 1,
+        visionEnabled: source.visionEnabled !== false,
+        visionRadius: source.visionRadius ?? 6,
+        dimVisionRadius: source.dimVisionRadius ?? 8,
+        brightVisionRadius: source.brightVisionRadius ?? 4,
+        lightRadius: source.lightRadius ?? 0,
+        auraColor: source.auraColor,
+        statusMarkers: source.statusMarkers || []
       };
       next.tokens.push(token);
       markExploredAroundToken(next, token);
@@ -1100,8 +1149,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const next = cloneMap(state.map);
       const token = next.tokens.find((entry) => entry.id === tokenId);
       if (!token || token.locked) return state;
-      const nextX = Math.max(0, Math.min(next.width - 1, Math.round(x)));
-      const nextY = Math.max(0, Math.min(next.height - 1, Math.round(y)));
+      const nextX = Math.round(x);
+      const nextY = Math.round(y);
       if (!state.sessionIgnoreCollision && isTokenMoveBlocked(next, token, nextX, nextY)) return state;
       token.x = nextX;
       token.y = nextY;
@@ -1118,8 +1167,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       state.selectedTokenIds.forEach((tokenId) => {
         const token = next.tokens.find((entry) => entry.id === tokenId);
         if (!token || token.locked) return;
-        const nextX = Math.max(0, Math.min(next.width - 1, Math.round(token.x + deltaX)));
-        const nextY = Math.max(0, Math.min(next.height - 1, Math.round(token.y + deltaY)));
+        const nextX = Math.round(token.x + deltaX);
+        const nextY = Math.round(token.y + deltaY);
         if (!state.sessionIgnoreCollision && isTokenMoveBlocked(next, token, nextX, nextY)) return;
         token.x = nextX;
         token.y = nextY;
@@ -1184,7 +1233,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedTokenIds,
         selectedObjectId: additive ? state.selectedObjectId : '',
         selectedObjectIds: additive ? state.selectedObjectIds : [],
-        selectedTileCells: additive ? state.selectedTileCells : []
+        selectedTileCells: additive ? state.selectedTileCells : [],
+        selectedMapInstanceIds: additive ? state.selectedMapInstanceIds : []
       };
     });
   },
@@ -1198,21 +1248,22 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         selectedTokenIds,
         selectedObjectId: additive ? state.selectedObjectId : '',
         selectedObjectIds: additive ? state.selectedObjectIds : [],
-        selectedTileCells: additive ? state.selectedTileCells : []
+        selectedTileCells: additive ? state.selectedTileCells : [],
+        selectedMapInstanceIds: additive ? state.selectedMapInstanceIds : []
       };
     });
   },
 
   setSessionViewMode(mode) {
-    set({ sessionViewMode: mode });
+    set({ sessionViewMode: mode, dirty: true });
   },
 
   setSessionDynamicVision(value) {
-    set({ sessionDynamicVision: value });
+    set({ sessionDynamicVision: value, dirty: true });
   },
 
   setSessionFogEnabled(value) {
-    set({ sessionFogEnabled: value });
+    set({ sessionFogEnabled: value, dirty: true });
   },
 
   setSessionIgnoreCollision(value) {
@@ -1220,7 +1271,282 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   },
 
   setSessionGlobalDarkness(value) {
-    set({ sessionGlobalDarkness: Math.max(0, Math.min(1, value)) });
+    const nextDarkness = Math.max(0, Math.min(1, value));
+    set((state) => ({
+      sessionGlobalDarkness: nextDarkness,
+      map: {
+        ...state.map,
+        sessionLighting: {
+          globalIllumination: state.map.sessionLighting?.globalIllumination ?? true,
+          darkness: nextDarkness,
+          ambientColor: state.map.sessionLighting?.ambientColor || '#d8e6ff',
+          ambientIntensity: state.map.sessionLighting?.ambientIntensity ?? 1,
+          playerVisible: state.map.sessionLighting?.playerVisible ?? false,
+          regions: state.map.sessionLighting?.regions || state.map.lightingRegions || []
+        }
+      },
+      dirty: true
+    }));
+  },
+
+  setSessionRegionPreset(preset) {
+    set({ sessionRegionPreset: preset });
+  },
+
+  updateSessionLighting(patch) {
+    set((state) => {
+      const current = getSessionLighting(state.map);
+      const next = {
+        ...current,
+        ...patch,
+        regions: patch.regions || current.regions
+      };
+      return {
+        sessionGlobalDarkness: next.darkness,
+        map: {
+          ...state.map,
+          sessionLighting: next,
+          lightingRegions: next.regions
+        },
+        dirty: true
+      };
+    });
+  },
+
+  addLightingRegion(region) {
+    set((state) => {
+      const current = getSessionLighting(state.map);
+      const next = {
+        ...current,
+        regions: [region, ...current.regions.filter((entry) => entry.id !== region.id)]
+      };
+      return {
+        map: {
+          ...state.map,
+          sessionLighting: next,
+          lightingRegions: next.regions
+        },
+        dirty: true
+      };
+    });
+  },
+
+  updateLightingRegion(regionId, patch) {
+    set((state) => {
+      const current = getSessionLighting(state.map);
+      const next = {
+        ...current,
+        regions: current.regions.map((region) => region.id === regionId ? { ...region, ...patch } : region)
+      };
+      return {
+        map: { ...state.map, sessionLighting: next, lightingRegions: next.regions },
+        dirty: true
+      };
+    });
+  },
+
+  removeLightingRegion(regionId) {
+    set((state) => {
+      const current = getSessionLighting(state.map);
+      const next = {
+        ...current,
+        regions: current.regions.filter((entry) => entry.id !== regionId)
+      };
+      return {
+        map: {
+          ...state.map,
+          sessionLighting: next,
+          lightingRegions: next.regions
+        },
+        dirty: true
+      };
+    });
+  },
+
+  selectLightingRegion(regionId, additive = false) {
+    set((state) => {
+      const exists = (state.map.sessionLighting?.regions || state.map.lightingRegions || []).some((region) => region.id === regionId);
+      if (!exists) return state;
+      return {
+        selectedRegionIds: additive ? toggleListValue(state.selectedRegionIds, regionId) : [regionId],
+        selectedObjectId: additive ? state.selectedObjectId : '',
+        selectedObjectIds: additive ? state.selectedObjectIds : [],
+        selectedTileCells: additive ? state.selectedTileCells : [],
+        selectedMapInstanceIds: additive ? state.selectedMapInstanceIds : [],
+        selectedTokenId: additive ? state.selectedTokenId : '',
+        selectedTokenIds: additive ? state.selectedTokenIds : []
+      };
+    });
+  },
+
+  moveSelectedLightingRegions(deltaX, deltaY) {
+    set((state) => {
+      if (!state.selectedRegionIds.length) return state;
+      const selected = new Set(state.selectedRegionIds);
+      const current = getSessionLighting(state.map);
+      const next = {
+        ...current,
+        regions: current.regions.map((region) => (
+          selected.has(region.id)
+            ? { ...region, points: region.points.map((point) => ({ x: point.x + deltaX, y: point.y + deltaY })) }
+            : region
+        ))
+      };
+      return {
+        map: { ...state.map, sessionLighting: next, lightingRegions: next.regions },
+        dirty: true
+      };
+    });
+  },
+
+  removeSelectedLightingRegions() {
+    set((state) => {
+      if (!state.selectedRegionIds.length) return state;
+      const selected = new Set(state.selectedRegionIds);
+      const current = getSessionLighting(state.map);
+      const next = {
+        ...current,
+        regions: current.regions.filter((region) => !selected.has(region.id))
+      };
+      return {
+        map: { ...state.map, sessionLighting: next, lightingRegions: next.regions },
+        selectedRegionIds: [],
+        dirty: true
+      };
+    });
+  },
+
+  addAreaTemplate(template) {
+    set((state) => ({
+      map: {
+        ...state.map,
+        areaTemplates: [template, ...(state.map.areaTemplates || []).filter((entry) => entry.id !== template.id)]
+      },
+      dirty: true
+    }));
+  },
+
+  addSessionMapInstance(sourceMap, x = 0, y = 0) {
+    set((state) => {
+      const base = cloneMap(sourceMap);
+      const instance: SessionMapInstance = {
+        id: createId('map-instance'),
+        sourceMapId: base.id,
+        sourceMapName: base.name,
+        name: base.name,
+        x,
+        y,
+        width: base.width,
+        height: base.height,
+        gridSize: base.gridSize,
+        rotation: 0,
+        locked: false,
+        visibleToPlayers: true,
+        opacity: 1,
+        zIndex: Math.max(0, ...(state.map.sessionMapInstances || []).map((entry) => entry.zIndex || 0)) + 1,
+        data: {
+          ...base,
+          mode: 'build',
+          tokens: [],
+          fogLayer: { ...base.fogLayer, revealedCells: [] },
+          sessionMapInstances: []
+        }
+      };
+      return {
+        map: {
+          ...state.map,
+          sessionMapInstances: [...(state.map.sessionMapInstances || []), instance]
+        },
+        selectedMapInstanceIds: [instance.id],
+        selectedObjectId: '',
+        selectedObjectIds: [],
+        selectedTileCells: [],
+        selectedTokenId: '',
+        selectedTokenIds: [],
+        dirty: true
+      };
+    });
+  },
+
+  updateSessionMapInstance(instanceId, patch) {
+    set((state) => ({
+      map: {
+        ...state.map,
+        sessionMapInstances: (state.map.sessionMapInstances || []).map((instance) => (
+          instance.id === instanceId ? { ...instance, ...patch } : instance
+        ))
+      },
+      dirty: true
+    }));
+  },
+
+  removeSessionMapInstance(instanceId) {
+    set((state) => ({
+      map: {
+        ...state.map,
+        sessionMapInstances: (state.map.sessionMapInstances || []).filter((instance) => instance.id !== instanceId)
+      },
+      selectedMapInstanceIds: state.selectedMapInstanceIds.filter((id) => id !== instanceId),
+      dirty: true
+    }));
+  },
+
+  duplicateSessionMapInstance(instanceId) {
+    set((state) => {
+      const source = (state.map.sessionMapInstances || []).find((instance) => instance.id === instanceId);
+      if (!source) return state;
+      const clone: SessionMapInstance = {
+        ...JSON.parse(JSON.stringify(source)),
+        id: createId('map-instance'),
+        name: `${source.name} copia`,
+        x: source.x + source.gridSize * 2,
+        y: source.y + source.gridSize * 2,
+        locked: false,
+        zIndex: Math.max(0, ...(state.map.sessionMapInstances || []).map((entry) => entry.zIndex || 0)) + 1
+      };
+      return {
+        map: {
+          ...state.map,
+          sessionMapInstances: [...(state.map.sessionMapInstances || []), clone]
+        },
+        selectedMapInstanceIds: [clone.id],
+        dirty: true
+      };
+    });
+  },
+
+  selectMapInstance(instanceId, additive = false) {
+    set((state) => {
+      const exists = (state.map.sessionMapInstances || []).some((instance) => instance.id === instanceId);
+      if (!exists) return state;
+      const selectedMapInstanceIds = additive ? toggleListValue(state.selectedMapInstanceIds, instanceId) : [instanceId];
+      return {
+        selectedMapInstanceIds,
+        selectedObjectId: additive ? state.selectedObjectId : '',
+        selectedObjectIds: additive ? state.selectedObjectIds : [],
+        selectedTileCells: additive ? state.selectedTileCells : [],
+        selectedTokenId: additive ? state.selectedTokenId : '',
+        selectedTokenIds: additive ? state.selectedTokenIds : []
+      };
+    });
+  },
+
+  moveSelectedMapInstances(deltaX, deltaY) {
+    set((state) => {
+      if (!state.selectedMapInstanceIds.length) return state;
+      const selected = new Set(state.selectedMapInstanceIds);
+      return {
+        map: {
+          ...state.map,
+          sessionMapInstances: (state.map.sessionMapInstances || []).map((instance) => (
+            selected.has(instance.id) && !instance.locked
+              ? { ...instance, x: instance.x + deltaX, y: instance.y + deltaY }
+              : instance
+          ))
+        },
+        dirty: true
+      };
+    });
   },
 
   toggleDoorAt(x, y) {
@@ -1295,6 +1621,26 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
           revealedCells: state.map.fogLayer.revealedCells.filter((cell) => cell.x !== x || cell.y !== y)
         }
       },
+      dirty: true
+    }));
+  },
+
+  revealAllFog() {
+    set((state) => {
+      const revealedCells: Array<{ x: number; y: number }> = [];
+      for (let y = 0; y < state.map.height; y += 1) {
+        for (let x = 0; x < state.map.width; x += 1) revealedCells.push({ x, y });
+      }
+      return {
+        map: { ...state.map, fogLayer: { ...state.map.fogLayer, revealedCells } },
+        dirty: true
+      };
+    });
+  },
+
+  hideAllFog() {
+    set((state) => ({
+      map: { ...state.map, fogLayer: { ...state.map.fogLayer, revealedCells: [] } },
       dirty: true
     }));
   }
@@ -1578,6 +1924,37 @@ function getTokenBounds(map: OmniMap, token: TabletopToken) {
   };
 }
 
+function getMapInstanceBounds(instance: SessionMapInstance) {
+  return {
+    x: instance.x,
+    y: instance.y,
+    width: instance.width * instance.gridSize,
+    height: instance.height * instance.gridSize
+  };
+}
+
+function getLightingRegionBounds(region: LightingRegion) {
+  if (!region.points.length) return { x: 0, y: 0, width: 1, height: 1 };
+  const xs = region.points.map((point) => point.x);
+  const ys = region.points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs, minX);
+  const maxY = Math.max(...ys, minY);
+  return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+}
+
+function getSessionLighting(map: OmniMap): SessionLightingState {
+  return {
+    globalIllumination: map.sessionLighting?.globalIllumination ?? true,
+    darkness: map.sessionLighting?.darkness ?? 0,
+    ambientColor: map.sessionLighting?.ambientColor || '#d8e6ff',
+    ambientIntensity: map.sessionLighting?.ambientIntensity ?? 1,
+    playerVisible: map.sessionLighting?.playerVisible ?? false,
+    regions: map.sessionLighting?.regions || map.lightingRegions || []
+  };
+}
+
 function isTokenMoveBlocked(map: OmniMap, token: TabletopToken, x: number, y: number) {
   const size = Math.max(1, Number(token.size || 1));
   for (let dy = 0; dy < size; dy += 1) {
@@ -1589,7 +1966,7 @@ function isTokenMoveBlocked(map: OmniMap, token: TabletopToken, x: number, y: nu
 }
 
 function isMovementBlockedCell(map: OmniMap, x: number, y: number) {
-  if (!isInsideCell(map, x, y)) return true;
+  if (!isInsideCell(map, x, y)) return false;
   const wall = findTileAtCell(map, 'walls', x, y);
   if (wall && wall.blocksMovement !== false) return true;
   const collision = findTileAtCell(map, 'collision', x, y);

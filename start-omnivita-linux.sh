@@ -56,6 +56,8 @@ else
   node "$REPO_ROOT/scripts/set-runtime-api-url.mjs" --relative
 fi
 
+npm --prefix "$REPO_ROOT/backend" run migrate
+
 echo "API interna:  $API_ORIGIN"
 echo "API no front: mesma origem (/api via proxy)"
 echo "Site: http://localhost:$SITE_PORT"

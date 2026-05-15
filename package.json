@@ -12,6 +12,8 @@
     "dev:host": "npm run set:api-relative && npm --prefix frontend run dev:host",
     "api": "npm --prefix backend run dev",
     "server": "npm --prefix backend run dev",
+    "backup:all": "npm --prefix backend run backup:all",
+    "restore:backup": "npm --prefix backend run restore:backup",
     "dev:all": "bash ./start-omnivita-linux.sh",
     "dev:linux": "bash ./start-omnivita-linux.sh",
     "serve:dist": "node scripts/serve-dist.mjs",

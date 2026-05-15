@@ -15,6 +15,8 @@ backend/.env.local
 *.log
 *.err.log
 *.tmp
+.omnivita-cloudflare-url
+*.desktop
 Thumbs.db
 .DS_Store
 .idea/

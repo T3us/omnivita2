@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { CharacterSheet, Combatant } from '../../api/types';
 import { hydrateCharacter } from '../../domain/system';
@@ -10,11 +10,24 @@ import { LayerPanel } from './LayerPanel';
 import { MapListPanel } from './MapListPanel';
 import { MapStage } from './MapStage';
 import { MapToolbar } from './MapToolbar';
+import { createBlankMap } from './mapFactory';
 import { useTabletopStore } from './mapStore';
 import { ObjectInspector } from './ObjectInspector';
 import { SessionModeView } from './session/SessionModeView';
 import { TokenPanel } from './TokenPanel';
-import type { AvailableTabletopToken, EraseMode, MapLayerKey, MapTool, OmniMap, SnapMode } from './types';
+import type {
+  AvailableTabletopToken,
+  DoorState,
+  EraseMode,
+  MapLayerKey,
+  MapTool,
+  OmniMap,
+  SessionBoard,
+  SessionDoorState,
+  SessionFogState,
+  SessionLightingState,
+  SnapMode
+} from './types';
 
 export function TabletopPage({
   characters,
@@ -39,9 +52,13 @@ export function TabletopPage({
   const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
   const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
   const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
+  const dirty = useTabletopStore((state) => state.dirty);
   const [message, setMessage] = useState('');
+  const [activeSessionBoardId, setActiveSessionBoardId] = useState('');
+  const [sessionSaveStatus, setSessionSaveStatus] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved');
   const [leftTab, setLeftTab] = useState<'map' | 'assets' | 'tools'>('assets');
   const [rightTab, setRightTab] = useState<'layers' | 'inspector' | 'selection' | 'session'>('layers');
+  const autosaveTimerRef = useRef<number | null>(null);
   const availableTokens = useMemo(() => buildAvailableTokens(characters, combatants), [characters, combatants]);
   const selectedAsset = getAsset(selectedAssetId, map.tilesets);
 
@@ -50,10 +67,16 @@ export function TabletopPage({
     queryFn: () => api.listMaps()
   });
 
+  const sessionBoardsQuery = useQuery({
+    queryKey: ['session-boards'],
+    queryFn: () => api.listSessionBoards()
+  });
+
   const saveMutation = useMutation({
-    mutationFn: (nextMap: OmniMap) => api.createMap(nextMap),
+    mutationFn: (nextMap: OmniMap) => api.createMap(stripSessionStateForMap(nextMap)),
     onSuccess: (result) => {
       setMap(result.map);
+      setActiveSessionBoardId('');
       clearDirty();
       setMessage('Mapa salvo.');
       queryClient.invalidateQueries({ queryKey: ['maps'] });
@@ -64,9 +87,10 @@ export function TabletopPage({
   });
 
   const loadMutation = useMutation({
-    mutationFn: (mapId: string) => api.getMap(mapId),
+    mutationFn: ({ mapId, mode = 'build' }: { mapId: string; mode?: OmniMap['mode'] }) => api.getMap(mapId).then((result) => ({ ...result, mode })),
     onSuccess: (result) => {
-      setMap({ ...result.map, mode: map.mode === 'session' ? 'session' : result.map.mode });
+      setMap({ ...stripSessionStateForMap(result.map), mode: result.mode });
+      if (result.mode === 'build') setActiveSessionBoardId('');
       setMessage('Mapa carregado.');
     },
     onError: (error) => {
@@ -86,14 +110,90 @@ export function TabletopPage({
     }
   });
 
+  const createSessionMutation = useMutation({
+    mutationFn: async (sourceMap: OmniMap) => api.createSessionBoard(createSessionBoardFromMap(sourceMap)),
+    onSuccess: (result) => {
+      setActiveSessionBoardId(result.board.id);
+      setMap(mapFromSessionBoard(result.board));
+      clearDirty();
+      setSessionSaveStatus('saved');
+      setMessage('Sessao limpa criada.');
+      queryClient.invalidateQueries({ queryKey: ['session-boards'] });
+    },
+    onError: (error) => {
+      setSessionSaveStatus('error');
+      setMessage(error instanceof Error ? error.message : 'Falha ao criar sessao.');
+    }
+  });
+
+  const loadSessionMutation = useMutation({
+    mutationFn: (boardId: string) => api.getSessionBoard(boardId),
+    onSuccess: (result) => {
+      setActiveSessionBoardId(result.board.id);
+      setMap(mapFromSessionBoard(result.board));
+      const state = useTabletopStore.getState();
+      state.setSessionViewMode(result.board.viewMode || 'gm');
+      state.setSessionFogEnabled(result.board.fog?.enabled ?? false);
+      state.setSessionDynamicVision(result.board.fog?.mode !== 'manual');
+      state.setSessionGlobalDarkness(result.board.lighting?.darkness ?? result.board.globalDarkness ?? state.sessionGlobalDarkness);
+      clearDirty();
+      setSessionSaveStatus('saved');
+      setMessage('Sessao carregada.');
+    },
+    onError: (error) => {
+      setSessionSaveStatus('error');
+      setMessage(error instanceof Error ? error.message : 'Falha ao carregar sessao.');
+    }
+  });
+
+  const saveSessionMutation = useMutation({
+    mutationFn: ({ board, boardId }: { board: SessionBoard; boardId: string }) => (
+      boardId ? api.updateSessionBoard(boardId, board) : api.createSessionBoard(board)
+    ),
+    onMutate: () => {
+      setSessionSaveStatus('saving');
+    },
+    onSuccess: (result) => {
+      setActiveSessionBoardId(result.board.id);
+      clearDirty();
+      setSessionSaveStatus('saved');
+      setMessage('Sessao salva.');
+      queryClient.invalidateQueries({ queryKey: ['session-boards'] });
+    },
+    onError: (error) => {
+      setSessionSaveStatus('error');
+      setMessage(error instanceof Error ? error.message : 'Falha ao salvar sessao.');
+    }
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: (boardId: string) => api.deleteSessionBoard(boardId),
+    onSuccess: (_result, boardId) => {
+      queryClient.invalidateQueries({ queryKey: ['session-boards'] });
+      if (boardId === activeSessionBoardId) {
+        setActiveSessionBoardId('');
+        useTabletopStore.getState().setMode('build');
+      }
+      setMessage('Sessao removida.');
+    },
+    onError: (error) => {
+      setMessage(error instanceof Error ? error.message : 'Falha ao remover sessao.');
+    }
+  });
+
   function handleNew() {
     const ok = window.confirm('Criar um mapa novo? Alteracoes locais nao salvas serao descartadas.');
     if (!ok) return;
+    setActiveSessionBoardId('');
     newMap('Novo mapa', 28, 18, 32);
     setMessage('Mapa novo criado.');
   }
 
   function handleSave() {
+    if (map.mode === 'session') {
+      handleSaveSession();
+      return;
+    }
     saveMutation.mutate(map);
   }
 
@@ -103,11 +203,99 @@ export function TabletopPage({
     deleteMutation.mutate(map.id);
   }
 
+  function handleSaveSession() {
+    const state = useTabletopStore.getState();
+    const board = createSessionBoardFromMap(state.map, {
+      id: activeSessionBoardId,
+      sourceMapId: activeSessionBoardId ? undefined : state.map.id
+    });
+    saveSessionMutation.mutate({ board, boardId: activeSessionBoardId });
+  }
+
+  async function handleCreateSessionFromMap(mapId: string) {
+    try {
+      const result = await api.getMap(mapId);
+      createSessionMutation.mutate(stripSessionStateForMap(result.map));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Falha ao abrir mapa base.');
+    }
+  }
+
+  async function handleAddMapInstance(mapId: string) {
+    try {
+      const result = await api.getMap(mapId);
+      const state = useTabletopStore.getState();
+      const offset = (state.map.sessionMapInstances?.length || 0) + 1;
+      state.addSessionMapInstance(stripSessionStateForMap(result.map), offset * state.map.gridSize * 4, 0);
+      setMessage('Mapa adicionado ao board.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Falha ao adicionar mapa ao board.');
+    }
+  }
+
+  function handleModeChange(mode: OmniMap['mode']) {
+    if (mode === 'build') {
+      useTabletopStore.getState().setMode('build');
+      return;
+    }
+    createSessionMutation.mutate(stripSessionStateForMap(map));
+  }
+
+  async function handleBackToBuild() {
+    const state = useTabletopStore.getState();
+    const selectedInstanceId = state.selectedMapInstanceIds[0];
+    const selectedInstance = selectedInstanceId
+      ? state.map.sessionMapInstances?.find((instance) => instance.id === selectedInstanceId)
+      : null;
+    const sourceMapId = selectedInstance?.sourceMapId || state.map.id;
+    const fallbackMap = stripSessionStateForMap(selectedInstance?.data || state.map);
+    setMessage('Abrindo modo construcao...');
+    try {
+      const result = await api.getMap(sourceMapId);
+      setMap({ ...stripSessionStateForMap(result.map), mode: 'build' });
+      setMessage('Modo construcao aberto.');
+    } catch (error) {
+      setMap({ ...fallbackMap, id: sourceMapId || fallbackMap.id, mode: 'build' });
+      setMessage(error instanceof Error ? `Mapa base indisponivel. Abrindo copia local: ${error.message}` : 'Mapa base indisponivel. Abrindo copia local.');
+    }
+  }
+
+  function handleDeleteSessionBoard(boardId: string) {
+    const ok = window.confirm('Excluir esta sessao salva? O mapa base nao sera removido.');
+    if (!ok) return;
+    deleteSessionMutation.mutate(boardId);
+  }
+
+  useEffect(() => {
+    if (map.mode !== 'session') return;
+    if (!dirty) return;
+    setSessionSaveStatus('dirty');
+    if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = window.setTimeout(() => {
+      const state = useTabletopStore.getState();
+      const board = createSessionBoardFromMap(state.map, {
+        id: activeSessionBoardId,
+        sourceMapId: activeSessionBoardId ? undefined : state.map.id
+      });
+      saveSessionMutation.mutate({ board, boardId: activeSessionBoardId });
+    }, 900);
+    return () => {
+      if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    };
+  }, [activeSessionBoardId, dirty, map]);
+
   const maps = mapsQuery.data?.maps || [];
-  const saving = saveMutation.isPending || loadMutation.isPending || deleteMutation.isPending;
+  const sessions = sessionBoardsQuery.data?.boards || [];
+  const saving = saveMutation.isPending
+    || loadMutation.isPending
+    || deleteMutation.isPending
+    || createSessionMutation.isPending
+    || loadSessionMutation.isPending
+    || saveSessionMutation.isPending
+    || deleteSessionMutation.isPending;
 
   return (
-    <div className="grid gap-4">
+    <div className="grid min-h-0 gap-4">
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -127,17 +315,24 @@ export function TabletopPage({
         <SessionModeView
           tokens={availableTokens}
           maps={maps}
-          mapsLoading={mapsQuery.isLoading || loadMutation.isPending}
+          mapsLoading={mapsQuery.isLoading || sessionBoardsQuery.isLoading || loadMutation.isPending || loadSessionMutation.isPending}
+          sessions={sessions}
+          activeSessionBoardId={activeSessionBoardId}
           saving={saving}
+          saveStatus={sessionSaveStatus}
           onSave={handleSave}
-          onLoadMap={(mapId) => loadMutation.mutate(mapId)}
+          onBackToBuild={handleBackToBuild}
+          onCreateSessionFromMap={handleCreateSessionFromMap}
+          onAddMapInstance={handleAddMapInstance}
+          onLoadSessionBoard={(boardId) => loadSessionMutation.mutate(boardId)}
+          onDeleteSessionBoard={handleDeleteSessionBoard}
         />
       ) : (
         <>
-          <MapToolbar saving={saving} onNew={handleNew} onSave={handleSave} onDelete={handleDelete} />
+          <MapToolbar saving={saving} onNew={handleNew} onSave={handleSave} onDelete={handleDelete} onModeChange={handleModeChange} />
 
-          <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
-        <div className="grid content-start gap-4">
+          <div className="grid min-h-0 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+        <div className="grid min-h-0 content-start gap-4">
           <PanelTabs
             value={leftTab}
             onChange={(value) => setLeftTab(value as typeof leftTab)}
@@ -154,7 +349,7 @@ export function TabletopPage({
                 maps={maps}
                 activeMapId={map.id}
                 loading={mapsQuery.isLoading || loadMutation.isPending}
-                onLoad={(mapId) => loadMutation.mutate(mapId)}
+                onLoad={(mapId) => loadMutation.mutate({ mapId, mode: 'build' })}
               />
             </>
           ) : null}
@@ -172,7 +367,7 @@ export function TabletopPage({
           {leftTab === 'tools' ? <ShortcutPanel /> : null}
         </div>
 
-        <div className="grid content-start gap-2">
+        <div className="grid min-h-0 content-start gap-2">
           <MapStage />
           <StatusBar
             tool={tool}
@@ -187,7 +382,7 @@ export function TabletopPage({
           />
         </div>
 
-        <div className="grid content-start gap-4">
+        <div className="grid min-h-0 content-start gap-4">
           <PanelTabs
             value={rightTab}
             onChange={(value) => setRightTab(value as typeof rightTab)}
@@ -219,12 +414,186 @@ export function TabletopPage({
   );
 }
 
+function createLocalId(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function clonePlain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function stripSessionStateForMap(sourceMap: OmniMap): OmniMap {
+  const next = clonePlain(sourceMap);
+  return {
+    ...next,
+    mode: 'build',
+    tokens: [],
+    fogLayer: {
+      ...next.fogLayer,
+      revealedCells: []
+    },
+    areaTemplates: [],
+    sessionMapInstances: []
+  };
+}
+
+function createSessionMapFromBase(sourceMap: OmniMap): OmniMap {
+  const base = stripSessionStateForMap(sourceMap);
+  return {
+    ...base,
+    mode: 'session',
+    sessionLighting: {
+      globalIllumination: base.sessionLighting?.globalIllumination ?? true,
+      darkness: base.sessionLighting?.darkness ?? 0,
+      ambientColor: base.sessionLighting?.ambientColor || '#d8e6ff',
+      ambientIntensity: base.sessionLighting?.ambientIntensity ?? 1,
+      playerVisible: base.sessionLighting?.playerVisible ?? false,
+      regions: base.sessionLighting?.regions || base.lightingRegions || []
+    },
+    lightingRegions: base.lightingRegions || base.sessionLighting?.regions || []
+  };
+}
+
+function createSessionBoardFromMap(sourceMap: OmniMap, options: { id?: string; sourceMapId?: string; name?: string } = {}): SessionBoard {
+  const store = useTabletopStore.getState();
+  const activeMap = sourceMap.mode === 'session' ? clonePlain(sourceMap) : createSessionMapFromBase(sourceMap);
+  const sourceMapId = options.sourceMapId || activeMap.id;
+  const sourceMapName = sourceMap.name || activeMap.name || 'Mapa';
+  const lighting = buildSessionLighting(activeMap);
+  activeMap.mode = 'session';
+  activeMap.sessionLighting = lighting;
+  activeMap.lightingRegions = lighting.regions;
+  const mainInstance = {
+    id: 'main',
+    sourceMapId,
+    sourceMapName,
+    name: sourceMapName,
+    x: 0,
+    y: 0,
+    width: activeMap.width,
+    height: activeMap.height,
+    gridSize: activeMap.gridSize,
+    rotation: 0,
+    locked: true,
+    visibleToPlayers: true,
+    opacity: 1,
+    zIndex: 0
+  };
+  const mapInstances = activeMap.sessionMapInstances?.length ? activeMap.sessionMapInstances : [mainInstance];
+
+  return {
+    id: options.id || createLocalId('session'),
+    name: options.name || `Sessao - ${sourceMapName}`,
+    sourceMapId,
+    sourceMapName,
+    activeMap,
+    mapInstances,
+    activeMapInstanceId: mapInstances[0]?.id || 'main',
+    tokens: activeMap.tokens || [],
+    doorStates: extractDoorStates(activeMap),
+    fog: buildSessionFog(activeMap),
+    lighting,
+    camera: {
+      x: 0,
+      y: 0,
+      zoom: store.zoom
+    },
+    templates: activeMap.areaTemplates || [],
+    combatStateId: '',
+    playerPreviewEnabled: store.sessionViewMode === 'player-preview',
+    metersPerCell: activeMap.metersPerCell || 1.5,
+    viewMode: store.sessionViewMode
+  };
+}
+
+function mapFromSessionBoard(board: SessionBoard): OmniMap {
+  const fallback = createBlankMap(board.sourceMapName || board.name || 'Sessao');
+  const activeMap = clonePlain(board.activeMap || fallback);
+  const next: OmniMap = {
+    ...activeMap,
+    mode: 'session',
+    tokens: board.tokens || activeMap.tokens || [],
+    fogLayer: {
+      ...(activeMap.fogLayer || fallback.fogLayer),
+      revealedCells: board.fog?.exploredCells || activeMap.fogLayer?.revealedCells || []
+    },
+    sessionLighting: board.lighting || activeMap.sessionLighting,
+    lightingRegions: board.lighting?.regions || activeMap.lightingRegions || [],
+    areaTemplates: board.templates || activeMap.areaTemplates || [],
+    sessionMapInstances: (board.mapInstances || activeMap.sessionMapInstances || []).filter((instance) => instance.id !== 'main'),
+    metersPerCell: board.metersPerCell || activeMap.metersPerCell || 1.5
+  };
+
+  const doorStates = new Map((board.doorStates || []).map((door) => [`${door.x}:${door.y}`, door]));
+  next.tileLayers.doors.cells = next.tileLayers.doors.cells.map((cell) => {
+    const door = doorStates.get(`${cell.x}:${cell.y}`);
+    if (!door) return cell;
+    return {
+      ...cell,
+      doorState: door.state,
+      blocksMovement: door.state !== 'open',
+      blocksVision: door.state !== 'open',
+      blocksSound: door.blocksSound,
+      secret: door.secret
+    };
+  });
+
+  return next;
+}
+
+function extractDoorStates(map: OmniMap): SessionDoorState[] {
+  return map.tileLayers.doors.cells.map((cell) => {
+    const state = (cell.doorState || 'closed') as DoorState;
+    return {
+      id: `door-${cell.x}-${cell.y}`,
+      x: cell.x,
+      y: cell.y,
+      state,
+      locked: state === 'locked',
+      secret: Boolean(cell.secret),
+      blocksMovement: state !== 'open',
+      blocksVision: state !== 'open',
+      blocksSound: cell.blocksSound,
+      updatedAt: new Date().toISOString()
+    };
+  });
+}
+
+function buildSessionFog(map: OmniMap): SessionFogState {
+  const store = useTabletopStore.getState();
+  const cells = map.fogLayer.revealedCells || [];
+  return {
+    enabled: store.sessionFogEnabled,
+    mode: store.sessionDynamicVision ? 'dynamic' : 'manual',
+    unexploredOpacity: 0.92,
+    exploredOpacity: 0.42,
+    visibleOpacity: 0,
+    exploredCells: cells,
+    manualHiddenCells: [],
+    manualRevealedCells: cells
+  };
+}
+
+function buildSessionLighting(map: OmniMap): SessionLightingState {
+  const store = useTabletopStore.getState();
+  const current = map.sessionLighting;
+  const regions = current?.regions || map.lightingRegions || [];
+  return {
+    globalIllumination: current?.globalIllumination ?? true,
+    darkness: store.sessionGlobalDarkness,
+    ambientColor: current?.ambientColor || '#d8e6ff',
+    ambientIntensity: current?.ambientIntensity ?? 1,
+    playerVisible: current?.playerVisible ?? false,
+    regions
+  };
+}
+
 function MapSettings({
   map,
   onChange
 }: {
   map: OmniMap;
-  onChange(patch: Pick<OmniMap, 'name' | 'width' | 'height' | 'gridSize'>): void;
+  onChange(patch: Partial<Pick<OmniMap, 'name' | 'width' | 'height' | 'gridSize' | 'metersPerCell'>>): void;
 }) {
   return (
     <section className="rounded-lg border border-line bg-panel/90 p-3">
@@ -243,12 +612,13 @@ function MapSettings({
           <NumberField label="Altura" value={map.height} min={8} max={120} onChange={(height) => onChange({ name: map.name, width: map.width, height, gridSize: map.gridSize })} />
           <NumberField label="Grid" value={map.gridSize} min={24} max={96} onChange={(gridSize) => onChange({ name: map.name, width: map.width, height: map.height, gridSize })} />
         </div>
+        <NumberField label="m/cel" value={map.metersPerCell || 1.5} min={0.5} max={10} step={0.5} onChange={(metersPerCell) => onChange({ metersPerCell })} />
       </div>
     </section>
   );
 }
 
-function NumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange(value: number): void }) {
+function NumberField({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min: number; max: number; step?: number; onChange(value: number): void }) {
   return (
     <label className="text-xs font-semibold text-textMuted">
       {label}
@@ -257,6 +627,7 @@ function NumberField({ label, value, min, max, onChange }: { label: string; valu
         type="number"
         min={min}
         max={max}
+        step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
       />

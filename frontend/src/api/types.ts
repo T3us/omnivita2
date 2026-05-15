@@ -145,7 +145,7 @@ export interface OmnivitaCodeEvaluationResponse {
 
 export type TabletopMode = 'build' | 'session';
 export type MapLayerKey = 'floor' | 'walls' | 'doors' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
-export type MapTool = 'select' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token';
+export type MapTool = 'select' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token' | 'template';
 export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
 export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
@@ -243,6 +243,14 @@ export interface LightSource {
   radius: number;
   intensity: number;
   color: string;
+  visibleToPlayers?: boolean;
+  affectsFog?: boolean;
+  affectsVision?: boolean;
+  attachedToTokenId?: string;
+  attachedToObjectId?: string;
+  coneAngle?: number;
+  coneDirection?: number;
+  gmOnly?: boolean;
 }
 
 export interface MapPrefabObject {
@@ -349,9 +357,15 @@ export interface TabletopToken {
   hidden?: boolean;
 }
 
+export type SavedMap = OmniMap;
+export type TemplateShape = 'circle' | 'cone' | 'line' | 'rect' | 'aura' | 'zone';
+export type LightingRegionShape = 'rect' | 'circle' | 'polygon';
+export type LightingDarknessMode = 'add' | 'subtract' | 'override';
+
 export interface SessionMapInstance {
   id: string;
   sourceMapId: string;
+  sourceMapName?: string;
   name: string;
   x: number;
   y: number;
@@ -361,26 +375,30 @@ export interface SessionMapInstance {
   rotation: number;
   locked: boolean;
   visibleToPlayers: boolean;
+  opacity?: number;
+  zIndex?: number;
+  attachedObjectIds?: string[];
+  data?: OmniMap;
 }
 
-export interface SessionBoard {
+export interface SessionToken extends TabletopToken {
+  sessionId?: string;
+}
+
+export interface SessionDoorState {
   id: string;
-  name: string;
-  maps: SessionMapInstance[];
-  activeMapInstanceId?: string;
-  camera: {
-    x: number;
-    y: number;
-    zoom: number;
-  };
-  globalDarkness: number;
-  ambientLight: number;
-  fogEnabled: boolean;
-  dynamicVisionEnabled: boolean;
-  viewMode: SessionViewMode;
+  x: number;
+  y: number;
+  state: DoorState;
+  locked?: boolean;
+  secret?: boolean;
+  blocksMovement: boolean;
+  blocksVision: boolean;
+  blocksSound?: boolean;
+  updatedAt?: string;
 }
 
-export interface FogState {
+export interface SessionFogState {
   enabled: boolean;
   mode: FogMode;
   unexploredOpacity: number;
@@ -389,6 +407,119 @@ export interface FogState {
   exploredCells: Array<{ x: number; y: number }>;
   manualHiddenCells: Array<{ x: number; y: number }>;
   manualRevealedCells: Array<{ x: number; y: number }>;
+}
+
+export interface FogState extends SessionFogState {}
+
+export interface LightingRegion {
+  id: string;
+  name: string;
+  type?: 'light' | 'darkness' | 'fog' | 'difficultTerrain' | 'hazard' | 'cover' | 'trigger' | 'note';
+  shape: LightingRegionShape;
+  points: Array<{ x: number; y: number }>;
+  darknessMode: LightingDarknessMode;
+  darkness: number;
+  color: string;
+  intensity: number;
+  blocksGlobalIllumination: boolean;
+  visibleToPlayers: boolean;
+  visibleToGM: boolean;
+  affectsVision?: boolean;
+  affectsFog?: boolean;
+  note?: string;
+}
+
+export interface SessionLightingState {
+  globalIllumination: boolean;
+  darkness: number;
+  ambientColor: string;
+  ambientIntensity: number;
+  playerVisible: boolean;
+  regions: LightingRegion[];
+}
+
+export interface SessionCameraState {
+  x: number;
+  y: number;
+  zoom: number;
+  playerPreview?: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+}
+
+export interface AreaTemplate {
+  id: string;
+  name: string;
+  shape: TemplateShape;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  radius?: number;
+  angle?: number;
+  color: string;
+  opacity: number;
+  visibleToPlayers: boolean;
+  createdAt?: string;
+}
+
+export interface AssetPack {
+  id: string;
+  name: string;
+  theme: string;
+  description: string;
+  assets: AssetDefinition[];
+  prefabs: PrefabDefinition[];
+}
+
+export interface PrefabDefinition {
+  id: string;
+  name: string;
+  theme: string;
+  category: string;
+  objects: MapPrefabObject[];
+  tags: string[];
+}
+
+export interface SessionBoard {
+  id: string;
+  name: string;
+  sourceMapId: string;
+  sourceMapName?: string;
+  activeMap?: OmniMap;
+  mapInstances: SessionMapInstance[];
+  maps?: SessionMapInstance[];
+  activeMapInstanceId?: string;
+  tokens: SessionToken[];
+  doorStates: SessionDoorState[];
+  fog: SessionFogState;
+  lighting: SessionLightingState;
+  camera: SessionCameraState;
+  templates: AreaTemplate[];
+  combatStateId?: string;
+  playerPreviewEnabled: boolean;
+  metersPerCell: number;
+  globalDarkness?: number;
+  ambientLight?: number;
+  fogEnabled?: boolean;
+  dynamicVisionEnabled?: boolean;
+  viewMode: SessionViewMode;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SessionBoardSummary {
+  id: string;
+  name: string;
+  sourceMapId: string;
+  sourceMapName?: string;
+  activeMapInstanceId?: string;
+  tokens: number;
+  exploredCells: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface OmniMap {
@@ -410,6 +541,12 @@ export interface OmniMap {
   fogLayer: FogLayer;
   tokens: TabletopToken[];
   prefabs?: MapPrefab[];
+  metersPerCell?: number;
+  lightingRegions?: LightingRegion[];
+  sessionLighting?: SessionLightingState;
+  areaTemplates?: AreaTemplate[];
+  assetPacks?: AssetPack[];
+  sessionMapInstances?: SessionMapInstance[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -430,4 +567,24 @@ export interface MapSummary {
 export interface ApiError extends Error {
   status?: number;
   payload?: unknown;
+}
+
+export interface BackupSummary {
+  schema: string;
+  version: number;
+  exportedAt: string;
+  users: number;
+  characters: number;
+  combatState: number;
+  masterData: number;
+  maps: number;
+  sessionBoards: number;
+  customAssets: number;
+  tabletopSettings: number;
+}
+
+export interface BackupImportResult {
+  dryRun: boolean;
+  message: string;
+  summary: BackupSummary;
 }

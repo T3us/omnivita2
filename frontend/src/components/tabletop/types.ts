@@ -1,11 +1,17 @@
 import type {
   Asset,
   AssetDefinition,
+  AssetPack,
   AssetTheme,
   AssetTypeCategory,
+  AreaTemplate,
+  BackupImportResult,
+  BackupSummary,
   DoorState,
   EraseMode,
   FogLayer,
+  FogState,
+  LightingRegion,
   LightSource,
   MapLayerKey,
   MapObject,
@@ -16,9 +22,17 @@ import type {
   MapTool,
   ObjectLayer,
   OmniMap,
+  PrefabDefinition,
+  SavedMap,
   SelectedTileCell,
   SessionBoard,
+  SessionBoardSummary,
+  SessionCameraState,
+  SessionDoorState,
+  SessionFogState,
+  SessionLightingState,
   SessionMapInstance,
+  SessionToken,
   SessionViewMode,
   SnapMode,
   TabletopMode,
@@ -33,11 +47,17 @@ import type {
 export type {
   Asset,
   AssetDefinition,
+  AssetPack,
   AssetTheme,
   AssetTypeCategory,
+  AreaTemplate,
+  BackupImportResult,
+  BackupSummary,
   DoorState,
   EraseMode,
   FogLayer,
+  FogState,
+  LightingRegion,
   LightSource,
   MapLayerKey,
   MapObject,
@@ -48,9 +68,17 @@ export type {
   MapTool,
   ObjectLayer,
   OmniMap,
+  PrefabDefinition,
+  SavedMap,
   SelectedTileCell,
   SessionBoard,
+  SessionBoardSummary,
+  SessionCameraState,
+  SessionDoorState,
+  SessionFogState,
+  SessionLightingState,
   SessionMapInstance,
+  SessionToken,
   SessionViewMode,
   SnapMode,
   TabletopMode,
@@ -73,4 +101,16 @@ export interface AvailableTabletopToken {
   hpCurrent?: number;
   hpMax?: number;
   subtitle?: string;
+  visibleToPlayers?: boolean;
+  hidden?: boolean;
+  locked?: boolean;
+  status?: string;
+  statusMarkers?: string[];
+  size?: number;
+  auraColor?: string;
+  visionEnabled?: boolean;
+  visionRadius?: number;
+  dimVisionRadius?: number;
+  brightVisionRadius?: number;
+  lightRadius?: number;
 }

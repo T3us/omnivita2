@@ -18,6 +18,7 @@ export function MapStage() {
   const map = useTabletopStore((state) => state.map);
   const tool = useTabletopStore((state) => state.tool);
   const zoom = useTabletopStore((state) => state.zoom);
+  const setZoom = useTabletopStore((state) => state.setZoom);
   const selectedAssetId = useTabletopStore((state) => state.selectedAssetId);
   const selectedObjectIds = useTabletopStore((state) => state.selectedObjectIds);
   const selectedTileCells = useTabletopStore((state) => state.selectedTileCells);
@@ -45,19 +46,68 @@ export function MapStage() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const paintingRef = useRef(false);
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
+  const spacePressedRef = useRef(false);
+  const panStartRef = useRef<{ pointer: { x: number; y: number }; camera: { x: number; y: number } } | null>(null);
   const wallLineModeRef = useRef(false);
   const strokeStartRef = useRef<{ x: number; y: number } | null>(null);
   const strokeCellsRef = useRef(new Set<string>());
+  const [viewport, setViewport] = useState({ width: 1100, height: 620 });
+  const [camera, setCamera] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
   const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  const stageWidth = map.width * map.gridSize * zoom;
-  const stageHeight = map.height * map.gridSize * zoom;
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (!element) return;
+    const update = () => {
+      const rect = element.getBoundingClientRect();
+      setViewport({
+        width: Math.max(320, Math.round(rect.width)),
+        height: Math.max(520, Math.round(rect.height || 620))
+      });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
-  function handlePointerDown(event: KonvaEventObject<MouseEvent | TouchEvent>) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (isEditableTarget(event.target)) return;
+      if (event.code !== 'Space') return;
+      event.preventDefault();
+      spacePressedRef.current = true;
+    }
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.code === 'Space') spacePressedRef.current = false;
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  function handlePointerDown(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
     if (isTransforming || isTransformerTarget(event.target)) return;
-    const pointer = getPointer(event.target.getStage(), zoom);
+    const screenPointer = getStagePointer(event.target.getStage());
+    if (!screenPointer) return;
+    const shouldPan = spacePressedRef.current
+      || getEventButton(event.evt) === 1
+      || (tool === 'select' && isEmptySelectionTarget(event.target) && getEventButton(event.evt) === 0 && !isAdditiveEvent(event.evt));
+    if (shouldPan) {
+      event.evt.preventDefault();
+      if (tool === 'select' && getEventButton(event.evt) === 0 && isEmptySelectionTarget(event.target)) clearObjectSelection();
+      panStartRef.current = { pointer: screenPointer, camera };
+      setIsPanning(true);
+      capturePointer(event);
+      return;
+    }
+    const pointer = screenToWorld(screenPointer, camera, zoom);
     if (!pointer) return;
     const cell = pointerToCell(pointer, map);
     setHoverPoint(pointer);
@@ -72,19 +122,19 @@ export function MapStage() {
     else if (isGridTool(tool)) handlePaintPointerDown(event, context);
   }
 
-  function handleSelectPointerDown(event: KonvaEventObject<MouseEvent | TouchEvent>, context: PointerContext) {
+  function handleSelectPointerDown(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>, context: PointerContext) {
     if (!isEmptySelectionTarget(event.target)) return;
-    if (!('shiftKey' in event.evt && event.evt.shiftKey)) clearObjectSelection();
+    if (!isAdditiveEvent(event.evt)) clearObjectSelection();
     selectionStartRef.current = context.pointer;
     setSelectionBox({ x: context.pointer.x, y: context.pointer.y, width: 0, height: 0 });
   }
 
-  function handlePaintPointerDown(event: KonvaEventObject<MouseEvent | TouchEvent>, context: PointerContext) {
+  function handlePaintPointerDown(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>, context: PointerContext) {
     if (!context.cell) return;
     captureHistory();
     paintingRef.current = true;
     strokeStartRef.current = context.cell;
-    wallLineModeRef.current = tool === 'wall' && Boolean('shiftKey' in event.evt && event.evt.shiftKey);
+    wallLineModeRef.current = tool === 'wall' && isAdditiveEvent(event.evt);
     strokeCellsRef.current = new Set();
     paintStrokeCell(context.cell, context.pointer);
   }
@@ -99,7 +149,7 @@ export function MapStage() {
     paintStrokeCell(context.cell, context.pointer);
   }
 
-  function handlePlacePointerDown(event: KonvaEventObject<MouseEvent | TouchEvent>, context: PointerContext) {
+  function handlePlacePointerDown(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>, context: PointerContext) {
     if (tool === 'door') {
       if (context.cell) addDoor(context.cell.x, context.cell.y, selectedAssetId, placementRotation);
       return;
@@ -108,9 +158,17 @@ export function MapStage() {
     addObject(selectedAssetId, context.pointer.x, context.pointer.y, parentId);
   }
 
-  function handlePointerMove(event: KonvaEventObject<MouseEvent | TouchEvent>) {
+  function handlePointerMove(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
     if (isTransforming) return;
-    const pointer = getPointer(event.target.getStage(), zoom);
+    const screenPointer = getStagePointer(event.target.getStage());
+    if (!screenPointer) return;
+    if (panStartRef.current) {
+      const dx = screenPointer.x - panStartRef.current.pointer.x;
+      const dy = screenPointer.y - panStartRef.current.pointer.y;
+      setCamera({ x: panStartRef.current.camera.x + dx, y: panStartRef.current.camera.y + dy });
+      return;
+    }
+    const pointer = screenToWorld(screenPointer, camera, zoom);
     if (!pointer) return;
     const cell = pointerToCell(pointer, map);
     setHoverPoint(pointer);
@@ -132,14 +190,17 @@ export function MapStage() {
     paintStrokeCell(cell, pointer);
   }
 
-  function handlePointerUp(event: KonvaEventObject<MouseEvent | TouchEvent>) {
+  function handlePointerUp(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
+    releasePointer(event);
     if (tool === 'select' && selectionStartRef.current && selectionBox) {
       const isTiny = Math.abs(selectionBox.width) < 4 && Math.abs(selectionBox.height) < 4;
       if (!isTiny) {
-        selectArea(selectionBox, Boolean('shiftKey' in event.evt && event.evt.shiftKey));
+        selectArea(selectionBox, isAdditiveEvent(event.evt));
       }
     }
     selectionStartRef.current = null;
+    panStartRef.current = null;
+    setIsPanning(false);
     setSelectionBox(null);
     paintingRef.current = false;
     wallLineModeRef.current = false;
@@ -172,8 +233,8 @@ export function MapStage() {
     const assetId = event.dataTransfer.getData('application/x-omnivita-asset');
     if (!assetId || !viewportRef.current) return;
     const rect = viewportRef.current.getBoundingClientRect();
-    const x = (event.clientX - rect.left + viewportRef.current.scrollLeft) / zoom;
-    const y = (event.clientY - rect.top + viewportRef.current.scrollTop) / zoom;
+    const x = (event.clientX - rect.left - camera.x) / zoom;
+    const y = (event.clientY - rect.top - camera.y) / zoom;
     const asset = getAsset(assetId, map.tilesets);
     const cell = pointerToCell({ x, y }, map);
     if ((asset?.defaultLayer === 'floor' || asset?.defaultLayer === 'walls') && cell) {
@@ -188,27 +249,53 @@ export function MapStage() {
     addObject(assetId, x, y, undefined);
   }
 
+  function handleWheel(event: KonvaEventObject<WheelEvent>) {
+    event.evt.preventDefault();
+    const screenPointer = getStagePointer(event.target.getStage());
+    if (!screenPointer) return;
+    const worldBefore = screenToWorld(screenPointer, camera, zoom);
+    const direction = event.evt.deltaY > 0 ? -1 : 1;
+    const nextZoom = Math.max(0.5, Math.min(2.5, zoom * (direction > 0 ? 1.08 : 0.92)));
+    setZoom(nextZoom);
+    setCamera({
+      x: screenPointer.x - worldBefore.x * nextZoom,
+      y: screenPointer.y - worldBefore.y * nextZoom
+    });
+  }
+
+  function resetCamera() {
+    setCamera({ x: 0, y: 0 });
+    setZoom(1);
+  }
+
+  function centerMap() {
+    setCamera({
+      x: viewport.width / 2 - (map.width * map.gridSize * zoom) / 2,
+      y: viewport.height / 2 - (map.height * map.gridSize * zoom) / 2
+    });
+  }
+
   return (
     <div
       ref={viewportRef}
-      className="min-h-[560px] overflow-auto rounded-lg border border-line bg-black/40"
+      className="relative h-[clamp(520px,calc(100vh-360px),760px)] min-h-0 select-none overflow-hidden rounded-lg border border-line bg-black/40 touch-none"
+      style={{ cursor: isPanning ? 'grabbing' : tool === 'select' ? 'grab' : undefined }}
       onDragOver={(event) => {
         if (map.mode === 'build') event.preventDefault();
       }}
       onDrop={handleDrop}
     >
       <Stage
-        width={stageWidth}
-        height={stageHeight}
-        onMouseDown={handlePointerDown}
-        onTouchStart={handlePointerDown}
-        onMouseMove={handlePointerMove}
-        onTouchMove={handlePointerMove}
-        onMouseUp={handlePointerUp}
-        onTouchEnd={handlePointerUp}
+        width={viewport.width}
+        height={viewport.height}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onMouseLeave={handlePointerUp}
+        onWheel={handleWheel}
       >
-        <Layer scaleX={zoom} scaleY={zoom}>
+        <Layer x={camera.x} y={camera.y} scaleX={zoom} scaleY={zoom}>
           <MapBackground map={map} />
           {isLayerVisible('floor', soloLayer) ? <TileLayerView layer={map.tileLayers.floor} map={map} /> : null}
           {isLayerVisible('walls', soloLayer) ? <TileLayerView layer={map.tileLayers.walls} map={map} wall /> : null}
@@ -237,6 +324,10 @@ export function MapStage() {
           {selectionBox ? <SelectionBox box={selectionBox} /> : null}
         </Layer>
       </Stage>
+      <div className="pointer-events-auto absolute right-3 top-3 flex flex-wrap gap-2 rounded-lg border border-line bg-panel/95 p-2 text-xs text-textMuted">
+        <button type="button" className="rounded-lg border border-line bg-white/5 px-2 py-1 font-bold text-textMain" onClick={resetCamera}>Reset camera</button>
+        <button type="button" className="rounded-lg border border-line bg-white/5 px-2 py-1 font-bold text-textMain" onClick={centerMap}>Centralizar mapa</button>
+      </div>
     </div>
   );
 }
@@ -244,11 +335,14 @@ export function MapStage() {
 function MapBackground({ map }: { map: OmniMap }) {
   return (
     <Rect
+      name="map-background"
       x={0}
       y={0}
       width={map.width * map.gridSize}
       height={map.height * map.gridSize}
-      fill="#08040f"
+      fill="rgba(8,4,15,0.18)"
+      stroke="rgba(196,181,253,0.18)"
+      strokeWidth={1}
     />
   );
 }
@@ -743,6 +837,7 @@ function TokenShape({
 
   return (
     <Group
+      name="map-token"
       x={token.x * size}
       y={token.y * size}
       draggable={draggable}
@@ -823,10 +918,17 @@ function Grid({ map }: { map: OmniMap }) {
   return <>{lines}</>;
 }
 
-function getPointer(stage: Konva.Stage | null, zoom: number) {
+function getStagePointer(stage: Konva.Stage | null) {
   const pointer = stage?.getPointerPosition();
   if (!pointer) return null;
-  return { x: pointer.x / zoom, y: pointer.y / zoom };
+  return { x: pointer.x, y: pointer.y };
+}
+
+function screenToWorld(pointer: { x: number; y: number }, camera: { x: number; y: number }, zoom: number) {
+  return {
+    x: (pointer.x - camera.x) / zoom,
+    y: (pointer.y - camera.y) / zoom
+  };
 }
 
 function pointerToCell(pointer: { x: number; y: number }, map: OmniMap) {
@@ -925,7 +1027,37 @@ function getAxisLockedLineCells(start: { x: number; y: number }, end: { x: numbe
 }
 
 function isEmptySelectionTarget(node: Konva.Node) {
-  return !isTransformerTarget(node) && !hasNamedAncestor(node, 'map-object');
+  return !isTransformerTarget(node) && !hasNamedAncestor(node, 'map-object') && !hasNamedAncestor(node, 'map-token');
+}
+
+function getEventButton(event: MouseEvent | TouchEvent | PointerEvent) {
+  return 'button' in event ? event.button : 0;
+}
+
+function isAdditiveEvent(event: MouseEvent | TouchEvent | PointerEvent) {
+  return 'shiftKey' in event && event.shiftKey;
+}
+
+function capturePointer(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
+  if (!('pointerId' in event.evt)) return;
+  const container = event.target.getStage()?.container();
+  if (!container?.setPointerCapture) return;
+  try {
+    container.setPointerCapture(event.evt.pointerId);
+  } catch {
+    // Pointer capture can already be released by the browser.
+  }
+}
+
+function releasePointer(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
+  if (!('pointerId' in event.evt)) return;
+  const container = event.target.getStage()?.container();
+  if (!container?.releasePointerCapture) return;
+  try {
+    container.releasePointerCapture(event.evt.pointerId);
+  } catch {
+    // Best-effort cleanup.
+  }
 }
 
 function getObjectIdFromTarget(node: Konva.Node) {
@@ -953,6 +1085,13 @@ function hasNamedAncestor(node: Konva.Node, name: string) {
     current = current.getParent();
   }
   return false;
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  const element = target as HTMLElement | null;
+  if (!element) return false;
+  const tag = element.tagName?.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || element.isContentEditable;
 }
 
 function normalizeRotation45(value: number) {

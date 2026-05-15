@@ -4,6 +4,7 @@ import { Navigate, Route, BrowserRouter as Router, Routes, useLocation } from 'r
 import { AuthProvider, useAuth } from './auth/auth-context';
 
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })));
+const DebugConnectionPage = lazy(() => import('./pages/DebugConnectionPage').then((module) => ({ default: module.DebugConnectionPage })));
 const MasterPage = lazy(() => import('./pages/MasterPage').then((module) => ({ default: module.MasterPage })));
 const OmnitrixPage = lazy(() => import('./pages/OmnitrixPage').then((module) => ({ default: module.OmnitrixPage })));
 const PlayerPage = lazy(() => import('./pages/PlayerPage').then((module) => ({ default: module.PlayerPage })));
@@ -26,6 +27,7 @@ export function App() {
           <Suspense fallback={<Splash />}>
             <Routes>
               <Route path="/" element={<RootRedirect />} />
+              <Route path="/debug-connection" element={<DebugConnectionPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/personagem" element={<ProtectedRoute role="player"><PlayerPage /></ProtectedRoute>} />
               <Route path="/mestre" element={<ProtectedRoute role="master"><MasterPage /></ProtectedRoute>} />

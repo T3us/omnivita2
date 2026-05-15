@@ -7,19 +7,23 @@ import registerAuthRoutes from './src/routes/auth.mjs';
 import registerBootstrapRoutes from './src/routes/bootstrap.mjs';
 import registerCharacterRoutes from './src/routes/characters.mjs';
 import registerCombatRoutes from './src/routes/combat.mjs';
+import registerBackupRoutes from './src/routes/backups.mjs';
 import registerMapRoutes from './src/routes/maps.mjs';
 import registerMasterDataRoutes from './src/routes/master-data.mjs';
 import registerOmnivitaRoutes from './src/routes/omnivita.mjs';
+import registerSessionBoardRoutes from './src/routes/session-boards.mjs';
 
 const app = Fastify({
   logger: true,
-  bodyLimit: 25 * 1024 * 1024
+  bodyLimit: 200 * 1024 * 1024
 });
 
 const services = {
   broadcastCombatState() {},
   broadcastMapState() {},
-  broadcastMapDeleted() {}
+  broadcastMapDeleted() {},
+  broadcastSessionBoardState() {},
+  broadcastSessionBoardDeleted() {}
 };
 
 await app.register(cors, {
@@ -66,16 +70,20 @@ app.setErrorHandler((error, request, reply) => {
 
 await registerAuthRoutes(app, { services });
 await registerBootstrapRoutes(app, { services });
+await registerBackupRoutes(app, { services });
 await registerCharacterRoutes(app, { services });
 await registerCombatRoutes(app, { services });
 await registerMapRoutes(app, { services });
 await registerMasterDataRoutes(app, { services });
 await registerOmnivitaRoutes(app, { services });
+await registerSessionBoardRoutes(app, { services });
 
 const sockets = attachSocketServer(app.server);
 services.broadcastCombatState = sockets.broadcastCombatState;
 services.broadcastMapState = sockets.broadcastMapState;
 services.broadcastMapDeleted = sockets.broadcastMapDeleted;
+services.broadcastSessionBoardState = sockets.broadcastSessionBoardState;
+services.broadcastSessionBoardDeleted = sockets.broadcastSessionBoardDeleted;
 
 try {
   await app.listen({

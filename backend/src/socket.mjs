@@ -81,6 +81,22 @@ export function attachSocketServer(httpServer) {
         meta,
         sentAt: new Date().toISOString()
       });
+    },
+    broadcastSessionBoardState(board, meta = {}) {
+      io.sockets.sockets.forEach((socket) => {
+        socket.emit('tabletop:session-board', {
+          board,
+          meta,
+          sentAt: new Date().toISOString()
+        });
+      });
+    },
+    broadcastSessionBoardDeleted(boardId, meta = {}) {
+      io.emit('tabletop:session-board-deleted', {
+        boardId,
+        meta,
+        sentAt: new Date().toISOString()
+      });
     }
   };
 }
