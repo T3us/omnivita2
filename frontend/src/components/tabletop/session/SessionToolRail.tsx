@@ -1,18 +1,31 @@
 import clsx from 'clsx';
+import {
+  CloudFog,
+  DoorOpen,
+  Hand,
+  Lightbulb,
+  MousePointer2,
+  Pencil,
+  Radar,
+  Ruler,
+  Shapes,
+  UserRoundPlus
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useTabletopStore } from '../mapStore';
 import type { MapTool } from '../types';
 
-const tools: Array<{ id: MapTool; icon: string; label: string; hint: string }> = [
-  { id: 'select', icon: 'V', label: 'Selecionar', hint: 'V' },
-  { id: 'pan', icon: 'H', label: 'Mover camera', hint: 'H ou Space' },
-  { id: 'token', icon: 'T', label: 'Criar token', hint: 'T' },
-  { id: 'fog', icon: 'F', label: 'Fog', hint: 'F' },
-  { id: 'light', icon: 'L', label: 'Luz', hint: 'L' },
-  { id: 'door', icon: 'D', label: 'Porta', hint: 'D' },
-  { id: 'measure', icon: 'M', label: 'Regua', hint: 'M' },
-  { id: 'ping', icon: 'P', label: 'Ping', hint: 'P' },
-  { id: 'template', icon: 'A', label: 'Area / template', hint: 'A' },
-  { id: 'note', icon: 'N', label: 'Nota', hint: 'N' }
+const tools: Array<{ id: MapTool; icon: LucideIcon; label: string; hint: string; group?: 'main' | 'scene' | 'utility' }> = [
+  { id: 'select', icon: MousePointer2, label: 'Selecionar', hint: 'V', group: 'main' },
+  { id: 'pan', icon: Hand, label: 'Mover camera', hint: 'H ou Space', group: 'main' },
+  { id: 'token', icon: UserRoundPlus, label: 'Criar token', hint: 'T', group: 'main' },
+  { id: 'fog', icon: CloudFog, label: 'Fog', hint: 'F', group: 'scene' },
+  { id: 'light', icon: Lightbulb, label: 'Luz', hint: 'L', group: 'scene' },
+  { id: 'door', icon: DoorOpen, label: 'Porta', hint: 'D', group: 'scene' },
+  { id: 'measure', icon: Ruler, label: 'Regua', hint: 'M', group: 'utility' },
+  { id: 'ping', icon: Radar, label: 'Ping', hint: 'P', group: 'utility' },
+  { id: 'template', icon: Shapes, label: 'Area / template', hint: 'A', group: 'utility' },
+  { id: 'note', icon: Pencil, label: 'Nota', hint: 'N', group: 'utility' }
 ];
 
 export function SessionToolRail({ collapsed = false }: { collapsed?: boolean }) {
@@ -21,25 +34,32 @@ export function SessionToolRail({ collapsed = false }: { collapsed?: boolean }) 
 
   if (collapsed) return null;
 
+  let lastGroup = tools[0]?.group;
+
   return (
-    <nav className="pointer-events-auto absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col gap-2 rounded-lg border border-line bg-panel/95 p-2 shadow-soft backdrop-blur-xl">
-      {tools.map((entry) => (
-        <button
-          key={entry.id}
-          type="button"
-          className={clsx(
-            'flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-black transition',
-            tool === entry.id
-              ? 'border-vita/70 bg-vita/25 text-textMain shadow-[0_0_18px_rgba(139,92,246,0.28)]'
-              : 'border-line bg-white/5 text-textMuted hover:bg-white/10 hover:text-textMain'
-          )}
-          onClick={() => setTool(entry.id)}
-          title={`${entry.label} (${entry.hint})`}
-          aria-label={entry.label}
-        >
-          {entry.icon}
-        </button>
-      ))}
+    <nav className="pointer-events-auto absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-line bg-[#12111a]/95 py-2 shadow-soft backdrop-blur-xl">
+      {tools.map((entry) => {
+        const Icon = entry.icon;
+        const needsDivider = entry.group !== lastGroup;
+        lastGroup = entry.group;
+        return (
+          <div key={entry.id} className={clsx(needsDivider && 'mt-2 border-t border-line/80 pt-2')}>
+            <button
+              type="button"
+              className={clsx(
+                'relative flex h-12 w-14 items-center justify-center text-[#9fb4d6] transition hover:bg-white/10 hover:text-textMain',
+                tool === entry.id && 'bg-vita/30 text-[#9db7ff]'
+              )}
+              onClick={() => setTool(entry.id)}
+              title={`${entry.label} (${entry.hint})`}
+              aria-label={entry.label}
+            >
+              {tool === entry.id ? <span className="absolute left-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-r bg-[#9db7ff]" /> : null}
+              <Icon size={22} strokeWidth={2.15} />
+            </button>
+          </div>
+        );
+      })}
     </nav>
   );
 }

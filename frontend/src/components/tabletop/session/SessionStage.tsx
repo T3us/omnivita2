@@ -307,7 +307,7 @@ function SessionMapInstanceView({
           dragStartRef.current = null;
         }}
       >
-        <Rect width={width} height={height} fill="#08040f" stroke={selected ? '#60a5fa' : '#7c3aed'} strokeWidth={selected ? 3 : 1} dash={selected ? [7, 5] : undefined} />
+        <Rect width={width} height={height} fill="#08040f" stroke={selected ? '#60a5fa' : '#7c3aed'} strokeWidth={selected ? 3 : 1} dash={selected ? [7, 5] : undefined} listening={!instance.locked} />
         <Text x={12} y={12} text={instance.name} fill="#ddd6fe" fontStyle="bold" fontSize={14} />
       </Group>
     );
@@ -351,7 +351,7 @@ function SessionMapInstanceView({
       <SessionObjectLayer layer={instanceMap.objectLayer} map={instanceMap} tool="brush" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
       <SessionObjectLayer layer={instanceMap.detailLayer} map={instanceMap} tool="brush" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
       <SessionObjectLayer layer={instanceMap.lightingLayer} map={instanceMap} tool="brush" selectedObjectIds={[]} viewMode={viewMode} onSelect={() => undefined} />
-      <Rect width={width} height={height} fill="rgba(0,0,0,0.01)" stroke={selected ? '#60a5fa' : instance.locked ? 'rgba(196,181,253,0.35)' : 'rgba(139,92,246,0.28)'} strokeWidth={selected ? 3 : 1} dash={selected || instance.locked ? [7, 5] : undefined} />
+      <Rect width={width} height={height} fill="rgba(0,0,0,0.01)" stroke={selected ? '#60a5fa' : instance.locked ? 'rgba(196,181,253,0.35)' : 'rgba(139,92,246,0.28)'} strokeWidth={selected ? 3 : 1} dash={selected || instance.locked ? [7, 5] : undefined} listening={!instance.locked} />
       <Text x={8} y={8} text={`${instance.name}${instance.locked ? ' / travado' : ''}`} fill="#ddd6fe" fontStyle="bold" fontSize={12} />
     </Group>
   );
