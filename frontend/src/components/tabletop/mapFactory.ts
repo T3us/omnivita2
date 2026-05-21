@@ -4,6 +4,7 @@ import type {
   AssetPack,
   FogLayer,
   LightingRegion,
+  MapBounds,
   MapLayerKey,
   MapObject,
   MapPrefab,
@@ -96,12 +97,19 @@ function createDefaultSessionLighting(): SessionLightingState {
 }
 
 export function createBlankMap(name = 'Novo mapa', width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, gridSize = DEFAULT_GRID): OmniMap {
+  const normalizedWidth = clampInteger(width, 8, 120);
+  const normalizedHeight = clampInteger(height, 8, 120);
+  const normalizedGridSize = clampInteger(gridSize, 24, 96);
   return {
     id: createId('map'),
     name,
-    width: clampInteger(width, 8, 120),
-    height: clampInteger(height, 8, 120),
-    gridSize: clampInteger(gridSize, 24, 96),
+    description: '',
+    theme: '',
+    tags: [],
+    thumbnail: '',
+    width: normalizedWidth,
+    height: normalizedHeight,
+    gridSize: normalizedGridSize,
     mode: 'build',
     activeLayer: 'floor',
     tilesets: DEFAULT_TILESETS,
@@ -136,9 +144,14 @@ export function normalizeMap(input: Partial<OmniMap> | null | undefined): OmniMa
     ...input,
     id: String(input?.id || base.id),
     name: String(input?.name || base.name),
+    description: input?.description ? String(input.description) : '',
+    theme: input?.theme ? String(input.theme) : '',
+    tags: Array.isArray(input?.tags) ? input.tags.map(String) : [],
+    thumbnail: input?.thumbnail ? String(input.thumbnail) : '',
     width: clampInteger(input?.width, 8, 120),
     height: clampInteger(input?.height, 8, 120),
     gridSize: clampInteger(input?.gridSize, 24, 96),
+    bounds: input?.bounds ? normalizeMapBounds(input.bounds, input?.width, input?.height) : undefined,
     mode: normalizeMode(input?.mode),
     activeLayer: normalizeLayer(input?.activeLayer),
     tilesets: normalizeTilesets(input?.tilesets),
@@ -484,6 +497,19 @@ function normalizeLightingRegion(region: Partial<LightingRegion>) {
   };
 }
 
+function normalizeMapBounds(bounds: Partial<MapBounds> | undefined, width?: number, height?: number): MapBounds {
+  const fallbackWidth = clampInteger(width, 8, 120);
+  const fallbackHeight = clampInteger(height, 8, 120);
+  const nextWidth = Number(bounds?.width);
+  const nextHeight = Number(bounds?.height);
+  return {
+    x: Math.round(Number(bounds?.x ?? 0)),
+    y: Math.round(Number(bounds?.y ?? 0)),
+    width: Number.isFinite(nextWidth) ? Math.max(1, Math.min(240, Math.round(nextWidth))) : fallbackWidth,
+    height: Number.isFinite(nextHeight) ? Math.max(1, Math.min(240, Math.round(nextHeight))) : fallbackHeight
+  };
+}
+
 function normalizeAreaTemplate(template: Partial<AreaTemplate>) {
   if (!template?.id) return null;
   const shape = ['circle', 'cone', 'line', 'rect', 'aura', 'zone'].includes(String(template.shape))
@@ -513,7 +539,7 @@ function normalizeSessionMapInstance(instance: Partial<SessionMapInstance>) {
     id: String(instance.id),
     sourceMapId: String(instance.sourceMapId || data?.id || instance.id),
     sourceMapName: instance.sourceMapName ? String(instance.sourceMapName) : data?.name,
-    name: String(instance.name || data?.name || 'Mapa da sessao'),
+    name: String(instance.name || data?.name || 'Mapa sem nome'),
     x: Number(instance.x || 0),
     y: Number(instance.y || 0),
     width: Number(instance.width || data?.width || 1),

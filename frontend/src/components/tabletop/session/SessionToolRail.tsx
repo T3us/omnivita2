@@ -24,7 +24,7 @@ const tools: Array<{ id: MapTool; icon: LucideIcon; label: string; hint: string;
   { id: 'door', icon: DoorOpen, label: 'Porta', hint: 'D', group: 'scene' },
   { id: 'measure', icon: Ruler, label: 'Regua', hint: 'M', group: 'utility' },
   { id: 'ping', icon: Radar, label: 'Ping', hint: 'P', group: 'utility' },
-  { id: 'template', icon: Shapes, label: 'Area / template', hint: 'A', group: 'utility' },
+  { id: 'template', icon: Shapes, label: 'Template', hint: 'A', group: 'utility' },
   { id: 'note', icon: Pencil, label: 'Nota', hint: 'N', group: 'utility' }
 ];
 

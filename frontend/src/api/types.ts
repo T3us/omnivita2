@@ -145,7 +145,7 @@ export interface OmnivitaCodeEvaluationResponse {
 
 export type TabletopMode = 'build' | 'session';
 export type MapLayerKey = 'floor' | 'walls' | 'doors' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
-export type MapTool = 'select' | 'pan' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token' | 'template';
+export type MapTool = 'select' | 'pan' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token' | 'template' | 'frame';
 export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
 export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
@@ -166,6 +166,13 @@ export interface SelectedTileCell {
   layer: TileLayerKey;
   x: number;
   y: number;
+}
+
+export interface MapBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface AssetDefinition {
@@ -529,9 +536,14 @@ export interface SessionBoardSummary {
 export interface OmniMap {
   id: string;
   name: string;
+  description?: string;
+  theme?: string;
+  tags?: string[];
+  thumbnail?: string;
   width: number;
   height: number;
   gridSize: number;
+  bounds?: MapBounds;
   mode: TabletopMode;
   activeLayer: MapLayerKey;
   tilesets: Tileset[];

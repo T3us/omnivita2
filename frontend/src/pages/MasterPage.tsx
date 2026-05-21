@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import type { ChangeEvent, ReactNode, RefObject } from 'react';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { BootstrapPayload, CharacterSheet, Combatant, CombatState, CompanionSheet, ScenarioState } from '../api/types';
@@ -31,8 +31,6 @@ import {
 } from '../domain/omnivita';
 import { optimizeCharacterImages, readFileAsOptimizedDataUrl } from '../utils/images';
 import { downloadJson, readJsonFile } from '../utils/json';
-
-const TabletopPage = lazy(() => import('../components/tabletop/TabletopPage').then((module) => ({ default: module.TabletopPage })));
 
 type QuickFilter = 'all' | 'alert' | 'instability' | 'entities' | 'absent' | 'focus';
 type MasterTab = 'session' | 'combat' | 'players' | 'omnivita' | 'tabletop' | 'backups' | 'scenarios' | 'libraries' | 'editor';
@@ -797,12 +795,31 @@ export function MasterPage() {
           />
         ) : null}
         {activeTab === 'tabletop' ? (
-          <Suspense fallback={<Card>Carregando mesa...</Card>}>
-            <TabletopPage
-              characters={characters}
-              combatants={currentCombatants}
-            />
-          </Suspense>
+          <Card className="grid gap-4">
+            <div>
+              <span className="rounded-full border border-vita/40 bg-vita/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-violet">Novo VTT</span>
+              <h2 className="mt-3 text-2xl font-black">Tabletop fullscreen</h2>
+              <p className="mt-2 max-w-2xl text-sm text-textMuted">
+                A mesa agora abre em uma rota dedicada, sem o dashboard do mestre por cima. Use esta entrada para Build e Sessao na interface nova.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link
+                to="/tabletop"
+                className="inline-flex items-center justify-center rounded-lg border border-vita/50 bg-vita/25 px-4 py-2 text-sm font-black text-textMain transition hover:bg-vita/35"
+              >
+                Abrir Tabletop
+              </Link>
+              <Link
+                to="/tabletop"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center rounded-lg border border-line bg-white/5 px-4 py-2 text-sm font-black text-textMuted transition hover:bg-white/10 hover:text-textMain"
+              >
+                Abrir em nova aba
+              </Link>
+            </div>
+          </Card>
         ) : null}
         {activeTab === 'backups' ? (
           <BackupPanel

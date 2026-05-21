@@ -13,6 +13,7 @@ import type {
   FogState,
   LightingRegion,
   LightSource,
+  MapBounds,
   MapLayerKey,
   MapObject,
   MapObjectKind,
@@ -59,6 +60,7 @@ export type {
   FogState,
   LightingRegion,
   LightSource,
+  MapBounds,
   MapLayerKey,
   MapObject,
   MapObjectKind,
@@ -98,6 +100,7 @@ export type SessionSelectedEntity =
   | { type: 'object'; id: string }
   | { type: 'region'; id: string }
   | { type: 'template'; id: string }
+  | { type: 'light'; id: string }
   | { type: 'door'; id: string; x: number; y: number };
 
 export interface AvailableTabletopToken {

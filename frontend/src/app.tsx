@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/auth-context';
+import { VttPage } from './components/tabletop/vtt/VttPage';
 
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })));
 const DebugConnectionPage = lazy(() => import('./pages/DebugConnectionPage').then((module) => ({ default: module.DebugConnectionPage })));
@@ -31,6 +32,10 @@ export function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/personagem" element={<ProtectedRoute role="player"><PlayerPage /></ProtectedRoute>} />
               <Route path="/mestre" element={<ProtectedRoute role="master"><MasterPage /></ProtectedRoute>} />
+              <Route path="/tabletop" element={<ProtectedRoute role="master"><VttPage /></ProtectedRoute>} />
+              <Route path="/tabletop/build" element={<ProtectedRoute role="master"><VttPage /></ProtectedRoute>} />
+              <Route path="/tabletop/session" element={<ProtectedRoute role="master"><VttPage /></ProtectedRoute>} />
+              <Route path="/vtt" element={<ProtectedRoute role="master"><VttPage /></ProtectedRoute>} />
               <Route path="/omnivita" element={<ProtectedRoute><OmnitrixPage /></ProtectedRoute>} />
               <Route path="/recuperar" element={<RecoveryPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

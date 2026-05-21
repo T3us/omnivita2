@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import type { AuthSession } from '../api/types';
-import { clearStoredSession, storeSession } from './session';
+import { clearStoredSession, readStoredSession, storeSession } from './session';
 
 interface AuthContextValue {
   session: AuthSession | null;
@@ -13,7 +13,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<AuthSession | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(() => readStoredSession());
   const [loading] = useState(false);
 
   const login = useCallback(async (identifier: string, password: string) => {

@@ -66,7 +66,7 @@ interface TabletopStore {
   dirty: boolean;
   setMap(map: Partial<OmniMap>): void;
   newMap(name: string, width: number, height: number, gridSize: number): void;
-  setMapMeta(patch: Partial<Pick<OmniMap, 'name' | 'width' | 'height' | 'gridSize' | 'metersPerCell'>>): void;
+  setMapMeta(patch: Partial<Pick<OmniMap, 'name' | 'description' | 'theme' | 'tags' | 'thumbnail' | 'width' | 'height' | 'gridSize' | 'metersPerCell' | 'bounds'>>): void;
   setMode(mode: TabletopMode): void;
   setTool(tool: MapTool): void;
   setActiveLayer(layer: MapLayerKey): void;
@@ -175,7 +175,7 @@ interface TabletopStore {
 const OBJECT_LAYER_ORDER: MapLayerKey[] = ['decoration', 'objects', 'details', 'lighting', 'mechanics', 'notes'];
 
 export const useTabletopStore = create<TabletopStore>((set, get) => ({
-  map: createBlankMap('Mapa da sessao'),
+  map: createBlankMap('Novo mapa'),
   tool: 'brush',
   selectedAssetId: 'floor-baixo-asphalt',
   selectedObjectId: '',
@@ -254,7 +254,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
   },
 
   setMode(mode) {
-    set((state) => ({ map: { ...state.map, mode }, tool: mode === 'build' ? state.tool : 'select', selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [], ...pushHistory(state), dirty: true }));
+    set((state) => ({ map: { ...state.map, mode }, tool: normalizeToolForMode(state.tool, mode), selectedObjectId: '', selectedObjectIds: [], selectedTileCells: [], selectedMapInstanceIds: [], selectedRegionIds: [], selectedEntities: [], selectedTokenId: '', selectedTokenIds: [], ...pushHistory(state), dirty: true }));
   },
 
   setTool(tool) {
@@ -398,7 +398,6 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     const selectedAsset = assetId || get().selectedAssetId;
     if (!selectedAsset) return;
     set((state) => {
-      if (!isInsideCell(state.map, x, y)) return state;
       const next = cloneMap(state.map);
       if (targetLayer === 'floor' || targetLayer === 'walls' || targetLayer === 'doors' || targetLayer === 'collision') {
         if (next.tileLayers[targetLayer].locked || next.tileLayers[targetLayer].editable === false) return state;
@@ -422,7 +421,6 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         if (target.locked || target.editable === false) return state;
         const asset = getAssetFromMap(next, selectedAsset);
         getBrushCells(x, y, brushSize).forEach((cell) => {
-          if (!isInsideCell(next, cell.x, cell.y)) return;
           target.cells = setTileCell(target.cells, cell.x, cell.y, selectedAsset, state.placementRotation, asset?.gridFootprint, getTileMetaForAsset(asset, targetLayer));
         });
         return { map: next, dirty: true };
@@ -431,7 +429,6 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         if (next.fogLayer.locked || next.fogLayer.editable === false) return state;
         const existing = new Set(next.fogLayer.revealedCells.map((cell) => `${cell.x}:${cell.y}`));
         getBrushCells(x, y, brushSize).forEach((cell) => {
-          if (!isInsideCell(next, cell.x, cell.y)) return;
           const key = `${cell.x}:${cell.y}`;
           if (existing.has(key)) return;
           existing.add(key);
@@ -471,7 +468,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
 
   addObject(assetId, x, y, parentId) {
     set((state) => {
-      if (!isInsidePixel(state.map, x, y)) return state;
+      const allowBoardPlacement = state.map.mode === 'build' || state.map.mode === 'session' || Boolean(state.map.sessionMapInstances?.length);
+      if (!allowBoardPlacement && !isInsidePixel(state.map, x, y)) return state;
       const history = pushHistory(state);
       const next = cloneMap(state.map);
       const layer = getObjectTargetLayer(next, assetId);
@@ -499,7 +497,6 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
     const selectedAsset = currentAsset?.kind === 'door' || currentAsset?.defaultLayer === 'doors' ? currentAssetId : 'door-metal';
     if (!selectedAsset) return;
     set((state) => {
-      if (!isInsideCell(state.map, x, y)) return state;
       const history = pushHistory(state);
       const next = cloneMap(state.map);
       const target = next.tileLayers.doors;
@@ -1543,7 +1540,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         height: base.height,
         gridSize: base.gridSize,
         rotation: 0,
-        locked: false,
+        locked: true,
         visibleToPlayers: true,
         opacity: 1,
         zIndex: Math.max(0, ...(state.map.sessionMapInstances || []).map((entry) => entry.zIndex || 0)) + 1,
@@ -1802,7 +1799,6 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
 
   revealFogCell(x, y) {
     set((state) => {
-      if (!isInsideCell(state.map, x, y)) return state;
       const key = `${x}:${y}`;
       if (state.map.fogLayer.revealedCells.some((cell) => `${cell.x}:${cell.y}` === key)) return state;
       return {
@@ -1878,6 +1874,13 @@ function pushHistory(state: TabletopStore) {
   };
 }
 
+const BUILD_TOOLS = new Set<MapTool>(['select', 'pan', 'brush', 'wall', 'collision', 'erase', 'object', 'door', 'cover', 'terminal', 'light', 'zone', 'note', 'fog', 'measure', 'token', 'frame']);
+const SESSION_TOOLS = new Set<MapTool>(['select', 'pan', 'token', 'fog', 'light', 'door', 'measure', 'ping', 'template', 'note']);
+
+function normalizeToolForMode(tool: MapTool, mode: TabletopMode): MapTool {
+  return (mode === 'build' ? BUILD_TOOLS : SESSION_TOOLS).has(tool) ? tool : 'select';
+}
+
 function getBrushCells(x: number, y: number, size: number) {
   const normalized = Math.max(1, Math.round(size));
   const offset = Math.floor(normalized / 2);
@@ -1899,7 +1902,7 @@ function isInsidePixel(map: OmniMap, x: number, y: number) {
 }
 
 function eraseCells(map: OmniMap, x: number, y: number, size: number, mode: EraseMode) {
-  const cells = getBrushCells(x, y, size).filter((cell) => isInsideCell(map, cell.x, cell.y));
+  const cells = getBrushCells(x, y, size);
   if (!cells.length) return;
   if (mode === 'activeLayer') {
     eraseLayerCells(map, map.activeLayer, cells);
@@ -1920,7 +1923,6 @@ function erasePoint(map: OmniMap, x: number, y: number, size: number, mode: Eras
     x: Math.floor(x / map.gridSize),
     y: Math.floor(y / map.gridSize)
   };
-  if (!isInsideCell(map, cell.x, cell.y)) return;
   if (mode === 'topVisible') {
     eraseTopVisiblePoint(map, x, y, cell);
     return;
@@ -2424,7 +2426,9 @@ function toggleSelectionList(values: SessionSelectedEntity[], entity: SessionSel
 function selectionPatchFromEntities(_state: TabletopStore, entities: SessionSelectedEntity[]) {
   const unique = Array.from(new Map(entities.map((entity) => [selectionEntityKey(entity), entity])).values());
   const selectedTokenIds = unique.filter((entity): entity is { type: 'token'; id: string } => entity.type === 'token').map((entity) => entity.id);
-  const selectedObjectIds = unique.filter((entity): entity is { type: 'object'; id: string } => entity.type === 'object').map((entity) => entity.id);
+  const selectedObjectIds = unique
+    .filter((entity): entity is { type: 'object'; id: string } | { type: 'light'; id: string } => entity.type === 'object' || entity.type === 'light')
+    .map((entity) => entity.id);
   const selectedMapInstanceIds = unique.filter((entity): entity is { type: 'map'; id: string } => entity.type === 'map').map((entity) => entity.id);
   const selectedRegionIds = unique.filter((entity): entity is { type: 'region'; id: string } => entity.type === 'region').map((entity) => entity.id);
   const selectedTileCells = unique
