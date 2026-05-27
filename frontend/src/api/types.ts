@@ -145,9 +145,9 @@ export interface OmnivitaCodeEvaluationResponse {
 
 export type TabletopMode = 'build' | 'session';
 export type MapLayerKey = 'floor' | 'walls' | 'doors' | 'objects' | 'decoration' | 'details' | 'lighting' | 'mechanics' | 'collision' | 'fog' | 'notes' | 'tokens';
-export type MapTool = 'select' | 'pan' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token' | 'template' | 'frame';
+export type MapTool = 'select' | 'pan' | 'move-token' | 'brush' | 'wall' | 'collision' | 'erase' | 'object' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note' | 'fog' | 'measure' | 'ping' | 'token' | 'template' | 'frame';
 export type MapObjectKind = 'prop' | 'decal' | 'shadow' | 'wall' | 'door' | 'cover' | 'terminal' | 'light' | 'zone' | 'note';
-export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'object';
+export type TabletopTokenKind = 'character' | 'companion' | 'enemy' | 'npc' | 'creature' | 'object' | 'form' | 'summon';
 export type SnapMode = 'grid' | 'fine' | 'free' | 'object';
 export type EraseMode = 'activeLayer' | 'topVisible' | 'allUnlocked';
 export type DoorState = 'open' | 'closed' | 'locked';
@@ -197,6 +197,8 @@ export interface AssetDefinition {
   zIndexDefault?: number;
   defaultOpacity?: number;
   defaultInteractable?: boolean;
+  proceduralKind?: string;
+  pattern?: string;
   color?: string;
   stroke?: string;
   icon?: string;
@@ -336,14 +338,28 @@ export interface FogLayer {
 export interface TabletopToken {
   id: string;
   sourceId: string;
+  definitionId?: string;
   characterId?: string;
   combatantId?: string;
   kind: TabletopTokenKind;
   name: string;
+  nameOverride?: string;
   image?: string;
+  color?: string;
   x: number;
   y: number;
   controlledBy?: string;
+  ownerUserId?: string;
+  ownerCharacterId?: string;
+  controlledByUserIds?: string[];
+  formOwnerCharacterId?: string;
+  sourceSheetId?: string;
+  sourceFormId?: string;
+  isPlayerToken?: boolean;
+  isFormToken?: boolean;
+  isMiniSheetToken?: boolean;
+  isSummonToken?: boolean;
+  blocksMovement?: boolean;
   hpCurrent?: number;
   hpMax?: number;
   peCurrent?: number;
@@ -392,6 +408,21 @@ export interface SessionMapInstance {
 
 export interface SessionToken extends TabletopToken {
   sessionId?: string;
+}
+
+export interface TokenDefinition {
+  id: string;
+  name: string;
+  kind: TabletopTokenKind;
+  ownerUserId?: string;
+  ownerCharacterId?: string;
+  sourceSheetId?: string;
+  sourceFormId?: string;
+  imageUrl?: string;
+  color?: string;
+  size?: number;
+  tags?: string[];
+  notes?: string;
 }
 
 export interface SessionDoorState {

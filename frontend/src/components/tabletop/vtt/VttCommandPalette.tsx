@@ -5,7 +5,7 @@ import type { MapTool } from '../types';
 
 const buildToolCommands: Array<{ label: string; tool: MapTool; keys: string }> = [
   { label: 'Selecionar', tool: 'select', keys: 'V' },
-  { label: 'Mover camera', tool: 'pan', keys: 'H' },
+  { label: 'Mover tokens', tool: 'move-token', keys: 'H' },
   { label: 'Pintar piso', tool: 'brush', keys: 'B' },
   { label: 'Parede', tool: 'wall', keys: 'W' },
   { label: 'Borracha', tool: 'erase', keys: 'E' },
@@ -19,7 +19,7 @@ const buildToolCommands: Array<{ label: string; tool: MapTool; keys: string }> =
 
 const sessionToolCommands: Array<{ label: string; tool: MapTool; keys: string }> = [
   { label: 'Selecionar', tool: 'select', keys: 'V' },
-  { label: 'Mover camera', tool: 'pan', keys: 'H' },
+  { label: 'Mover tokens', tool: 'move-token', keys: 'H' },
   { label: 'Spawn token', tool: 'token', keys: 'T' },
   { label: 'Fog', tool: 'fog', keys: 'F' },
   { label: 'Luz', tool: 'light', keys: 'L' },

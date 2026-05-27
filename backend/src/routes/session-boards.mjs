@@ -1,9 +1,12 @@
-import { requireMaster } from '../auth.mjs';
+import { requireAuth, requireMaster } from '../auth.mjs';
 import {
   createSessionBoard,
   deleteSessionBoard,
+  getLatestSessionBoard,
   getSessionBoardById,
   listSessionBoards,
+  moveSessionTokenOnBoard,
+  sanitizeSessionBoardForUser,
   updateSessionBoard
 } from '../session-boards.mjs';
 
@@ -12,6 +15,31 @@ export default async function registerSessionBoardRoutes(app, { services } = {})
     const auth = await requireMaster(request, reply);
     if (!auth) return;
     reply.send({ boards: await listSessionBoards() });
+  });
+
+  app.get('/api/session-boards/active', async (request, reply) => {
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    const board = await getLatestSessionBoard();
+    reply.send({ board: board ? sanitizeSessionBoardForUser(board, auth.user) : null });
+  });
+
+  app.put('/api/session-boards/active/tokens/:tokenId', async (request, reply) => {
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    const board = await getLatestSessionBoard();
+    if (!board) {
+      reply.code(404).send({ message: 'Sessao ativa nao encontrada.' });
+      return;
+    }
+    const moved = moveSessionTokenOnBoard(board, request.params.tokenId, request.body?.x, request.body?.y, auth.user);
+    if (!moved.ok) {
+      reply.code(moved.reason === 'permission' ? 403 : 404).send({ message: moved.reason === 'permission' ? 'Voce nao controla este token.' : 'Token nao encontrado.' });
+      return;
+    }
+    const saved = await updateSessionBoard(board.id, moved.board);
+    services?.broadcastSessionBoardState?.(saved, { reason: 'token-moved', userId: auth.user.id, tokenId: request.params.tokenId });
+    reply.send({ board: sanitizeSessionBoardForUser(saved, auth.user), token: moved.token });
   });
 
   app.get('/api/session-boards/:id', async (request, reply) => {

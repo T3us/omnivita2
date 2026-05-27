@@ -231,6 +231,16 @@ export const api = {
   getSessionBoard(boardId: string) {
     return apiRequest<{ board: SessionBoard }>(`/api/session-boards/${encodeURIComponent(boardId)}`);
   },
+  getActiveSessionBoard() {
+    return apiRequest<{ board: SessionBoard | null }>('/api/session-boards/active');
+  },
+  moveActiveSessionToken(tokenId: string, position: { x: number; y: number }) {
+    return apiRequest<{ board: SessionBoard | null }>(`/api/session-boards/active/tokens/${encodeURIComponent(tokenId)}`, {
+      method: 'PUT',
+      body: position,
+      timeoutMs: 12000
+    });
+  },
   createSessionBoard(board: SessionBoard) {
     return apiRequest<{ board: SessionBoard }>('/api/session-boards', {
       method: 'POST',

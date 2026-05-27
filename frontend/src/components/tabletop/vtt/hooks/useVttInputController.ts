@@ -55,7 +55,10 @@ export function useVttInputController({
   isPanningRef,
   heldAssetId,
   heldToken,
+  heldMapData,
+  publishPointerState,
   clearHeld,
+  onPlaceHeldMap,
   onMapCapture
 }: {
   map: OmniMap;
@@ -69,7 +72,10 @@ export function useVttInputController({
   isPanningRef: MutableRefObject<unknown>;
   heldAssetId: string;
   heldToken: AvailableTabletopToken | null;
+  heldMapData: OmniMap | null;
+  publishPointerState?: boolean;
   clearHeld(): void;
+  onPlaceHeldMap?(x: number, y: number): void;
   onMapCapture?(bounds: MapBounds): void;
 }) {
   const intentRef = useRef<PointerIntent>('idle');
@@ -78,6 +84,7 @@ export function useVttInputController({
   const paintStrokeRef = useRef<PaintStroke | null>(null);
   const selectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const rulerDraftRef = useRef<Ruler | null>(null);
+  const mapCaptureStartRef = useRef<VttPoint | null>(null);
   const drag = useVttDragController();
 
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -91,6 +98,7 @@ export function useVttInputController({
   const [lastButtons, setLastButtons] = useState(0);
   const [targetEntityLabel, setTargetEntityLabel] = useState('none');
   const [paintStrokeCellCount, setPaintStrokeCellCount] = useState(0);
+  const [boxSelectMode, setBoxSelectMode] = useState(false);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -99,7 +107,16 @@ export function useVttInputController({
         spacePressedRef.current = true;
         return;
       }
-      if (event.code === 'Escape') cancelPointerAction();
+      if (event.key.toLowerCase() === 'x' && tool === 'select') {
+        setBoxSelectMode(true);
+        return;
+      }
+      if (event.code === 'Escape') {
+        setBoxSelectMode(false);
+        setMeasureDraft(null);
+        mapCaptureStartRef.current = null;
+        cancelPointerAction();
+      }
     }
 
     function onKeyUp(event: KeyboardEvent) {
@@ -113,20 +130,24 @@ export function useVttInputController({
     }
 
     function onPointerUp() {
-      if (pointerStateRef.current) forceEndPointerAction();
+      if (pointerStateRef.current) completePointerAction(pointerStateRef.current.lastWorld);
+    }
+
+    function onPointerCancel() {
+      cancelPointerAction();
     }
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
     window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
     };
   });
 
@@ -134,6 +155,8 @@ export function useVttInputController({
     cancelPointerAction();
     setMeasureDraft(null);
     setSelectionRect(null);
+    mapCaptureStartRef.current = null;
+    setBoxSelectMode(false);
   }, [map.mode, tool]);
 
   function handlePointerDown(event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) {
@@ -158,8 +181,7 @@ export function useVttInputController({
     };
 
     event.evt.preventDefault();
-    setCursorWorld(world);
-    setLastButtons(getButtons(event.evt));
+    publishPointerDebugState(world, getButtons(event.evt), true);
     pointerStateRef.current = pointerState;
     setIsPointerDown(true);
     setTargetEntityLabel(hit ? entityKey(hit) : 'grid');
@@ -176,13 +198,33 @@ export function useVttInputController({
       return;
     }
 
+    if (heldMapData) {
+      placeHeldMap(world);
+      finishPointerAction();
+      return;
+    }
+
     if (heldAssetId) {
       placeHeldAsset(world);
       finishPointerAction();
       return;
     }
 
+    if (tool === 'move-token') {
+      handleMoveTokenPointerDown(hit, pointerState);
+      return;
+    }
+
     if (tool === 'frame' && map.mode === 'build') {
+      if (mapCaptureStartRef.current) {
+        const rect = rectFromPoints(mapCaptureStartRef.current, world);
+        mapCaptureStartRef.current = null;
+        if (Math.abs(rect.width) > map.gridSize / 2 && Math.abs(rect.height) > map.gridSize / 2) {
+          onMapCapture?.(rectToCellBounds(rect, map.gridSize));
+        }
+        finishPointerAction();
+        return;
+      }
       setSelectionRect(null);
       setIntent('savingArea');
       return;
@@ -239,14 +281,15 @@ export function useVttInputController({
     if (!screen) return;
 
     const world = screenToWorld(screen);
-    setCursorWorld(world);
-    setLastButtons(getButtons(event.evt));
+    publishPointerDebugState(world, getButtons(event.evt));
 
     const pointerState = pointerStateRef.current;
-    if (!pointerState) return;
+    if (!pointerState) {
+      updateTwoClickDrafts(world);
+      return;
+    }
 
-    if (!isButtonStillDown(event.evt, pointerState.button)) {
-      forceEndPointerAction();
+    if (!shouldContinuePointerAction(event.evt, pointerState, intentRef.current)) {
       return;
     }
 
@@ -351,13 +394,25 @@ export function useVttInputController({
       return;
     }
 
-    if (pointerState.additive) {
+    if (pointerState.additive || boxSelectMode) {
       setSelectionRect(null);
       setIntent('boxSelecting');
       return;
     }
 
     beginPan(screen);
+  }
+
+  function handleMoveTokenPointerDown(hit: SessionSelectedEntity | null, pointerState: PointerState) {
+    if (hit?.type !== 'token') {
+      if (!pointerState.additive) useTabletopStore.getState().clearSelection();
+      finishPointerAction();
+      return;
+    }
+    const state = useTabletopStore.getState();
+    state.selectEntity(hit, pointerState.additive);
+    drag.start(hit, pointerState.startWorld);
+    setIntent('draggingToken');
   }
 
   function beginPan(screen: VttPoint) {
@@ -393,16 +448,19 @@ export function useVttInputController({
     const stroke = paintStrokeRef.current;
     if (!stroke) return;
     const state = useTabletopStore.getState();
+    const nextCells: Cell[] = [];
     cells.forEach((cell) => {
       const key = `${cell.x}:${cell.y}`;
       if (stroke.cells.has(key)) return;
       stroke.cells.add(key);
-      if (stroke.tool === 'brush') state.paintBrush(cell.x, cell.y, 'floor');
-      if (stroke.tool === 'wall') state.paintBrush(cell.x, cell.y, 'walls', 'wall-brick');
-      if (stroke.tool === 'collision') state.paintBrush(cell.x, cell.y, 'collision', 'wall-brick');
-      if (stroke.tool === 'erase') state.eraseBrush(cell.x, cell.y);
-      if (stroke.tool === 'fog') state.paintBrush(cell.x, cell.y, 'fog');
+      nextCells.push(cell);
     });
+    if (!nextCells.length) return;
+    if (stroke.tool === 'brush') state.paintBrushCells(nextCells, 'floor');
+    if (stroke.tool === 'wall') state.paintBrushCells(nextCells, 'walls');
+    if (stroke.tool === 'collision') state.paintBrushCells(nextCells, 'collision', 'wall-brick');
+    if (stroke.tool === 'erase') state.eraseBrushCells(nextCells);
+    if (stroke.tool === 'fog') state.paintBrushCells(nextCells, 'fog');
     setPaintStrokeCellCount(stroke.cells.size);
   }
 
@@ -456,6 +514,11 @@ export function useVttInputController({
 
   function beginMeasure(world: VttPoint) {
     setSelectionRect(null);
+    if (rulerDraftRef.current) {
+      finishMeasure(world);
+      finishPointerAction();
+      return;
+    }
     setMeasureDraft({ id: `ruler-${Date.now()}`, start: world, end: world });
     setIntent('measuring');
   }
@@ -485,6 +548,13 @@ export function useVttInputController({
   function placeHeldAsset(world: VttPoint) {
     if (!heldAssetId) return;
     useTabletopStore.getState().addObject(heldAssetId, world.x, world.y);
+    clearHeld();
+  }
+
+  function placeHeldMap(world: VttPoint) {
+    if (!heldMapData) return;
+    const point = snapPointToGrid(world, heldMapData.gridSize || map.gridSize);
+    onPlaceHeldMap?.(point.x, point.y);
     clearHeld();
   }
 
@@ -520,22 +590,20 @@ export function useVttInputController({
       useTabletopStore.getState().clearSelection();
     }
 
-    if (intent === 'savingArea' && pointerState?.boxVisible && selectionBoxRef.current) {
-      onMapCapture?.(rectToCellBounds(selectionBoxRef.current, map.gridSize));
+    if (intent === 'savingArea') {
+      if (pointerState?.boxVisible && selectionBoxRef.current) {
+        mapCaptureStartRef.current = null;
+        onMapCapture?.(rectToCellBounds(selectionBoxRef.current, map.gridSize));
+      } else if (pointerState) {
+        mapCaptureStartRef.current = pointerState.startWorld;
+        setSelectionRect({ x: pointerState.startWorld.x, y: pointerState.startWorld.y, width: 0, height: 0 });
+      }
     }
 
     if (isDraggingIntent(intent)) drag.finish();
-    if (intent === 'measuring') finishMeasure(world);
+    if (intent === 'measuring' && pointerState?.moved) finishMeasure(world);
     if (intent === 'drawingTemplate') finishTemplate(world);
 
-    finishPointerAction();
-  }
-
-  function forceEndPointerAction() {
-    if (intentRef.current === 'measuring') {
-      finishMeasure(pointerStateRef.current?.lastWorld);
-    }
-    if (isDraggingIntent(intentRef.current)) drag.finish();
     finishPointerAction();
   }
 
@@ -546,10 +614,11 @@ export function useVttInputController({
     pointerStateRef.current = null;
     paintStrokeRef.current = null;
     setIsPointerDown(false);
-    setSelectionRect(null);
+    if (!mapCaptureStartRef.current) setSelectionRect(null);
     setPaintStrokeCellCount(0);
     setLastButtons(0);
     setTargetEntityLabel('none');
+    if (boxSelectMode && intentRef.current !== 'boxSelecting') setBoxSelectMode(false);
   }
 
   function cancelPointerAction() {
@@ -558,11 +627,22 @@ export function useVttInputController({
     setIntent('idle');
     pointerStateRef.current = null;
     paintStrokeRef.current = null;
+    mapCaptureStartRef.current = null;
     setIsPointerDown(false);
     setSelectionRect(null);
     setPaintStrokeCellCount(0);
     setLastButtons(0);
     setTargetEntityLabel('none');
+  }
+
+  function updateTwoClickDrafts(world: VttPoint) {
+    if (tool === 'measure' && rulerDraftRef.current) {
+      setMeasureDraft({ ...rulerDraftRef.current, end: world });
+      return;
+    }
+    if (tool === 'frame' && mapCaptureStartRef.current) {
+      setSelectionRect(rectFromPoints(mapCaptureStartRef.current, world));
+    }
   }
 
   function updateSelectionRect(pointerState: PointerState, screen: VttPoint, world: VttPoint) {
@@ -603,6 +683,12 @@ export function useVttInputController({
     setRulerDraft(draft);
   }
 
+  function publishPointerDebugState(world: VttPoint, buttons: number, force = false) {
+    if (!force && !publishPointerState && !heldAssetId && !heldToken && !heldMapData && !rulerDraftRef.current && !mapCaptureStartRef.current) return;
+    setCursorWorld(world);
+    setLastButtons(buttons);
+  }
+
   return {
     selectionBox,
     pointerIntent,
@@ -614,6 +700,7 @@ export function useVttInputController({
     setKeepRuler,
     pings,
     cursorWorld,
+    dragPreview: drag.preview,
     debug: {
       mode: map.mode,
       tool,
@@ -624,6 +711,7 @@ export function useVttInputController({
       targetEntity: targetEntityLabel,
       cell: worldToCell(cursorWorld, map.gridSize),
       paintStrokeCellCount,
+      dragCommitCount: drag.preview.commitCount,
       measureActive: Boolean(rulerDraft),
       boxSelectActive: Boolean(selectionBox)
     },
@@ -653,11 +741,10 @@ function getPointerId(event: MouseEvent | TouchEvent | PointerEvent) {
   return 'pointerId' in event ? event.pointerId : null;
 }
 
-function isButtonStillDown(event: MouseEvent | TouchEvent | PointerEvent, startedButton: number) {
-  if (!('buttons' in event)) return true;
-  if (startedButton === 1) return (event.buttons & 4) === 4;
-  if (startedButton === 2) return (event.buttons & 2) === 2;
-  return (event.buttons & 1) === 1;
+function shouldContinuePointerAction(event: MouseEvent | TouchEvent | PointerEvent, pointerState: PointerState, intent: PointerIntent) {
+  if (intent === 'idle') return false;
+  if ('pointerId' in event && pointerState.id !== null && event.pointerId !== pointerState.id) return false;
+  return true;
 }
 
 function isAdditive(event: MouseEvent | TouchEvent | PointerEvent) {
@@ -688,6 +775,18 @@ function worldToCell(world: VttPoint, gridSize: number): Cell {
 
 function pointerDistance(a: VttPoint, b: VttPoint) {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function rectFromPoints(start: VttPoint, end: VttPoint) {
+  return { x: start.x, y: start.y, width: end.x - start.x, height: end.y - start.y };
+}
+
+function snapPointToGrid(point: VttPoint, gridSize: number) {
+  const size = Math.max(1, gridSize);
+  return {
+    x: Math.round(point.x / size) * size,
+    y: Math.round(point.y / size) * size
+  };
 }
 
 function rulerDistance(ruler: Ruler) {

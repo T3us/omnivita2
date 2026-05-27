@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api } from '../../../api/client';
+import { subscribeTabletopSessionBoard } from '../../../api/socket';
 import type { CharacterSheet, Combatant, DoorState, MapBounds, OmniMap, SessionBoard, SessionDoorState, SessionFogState, SessionLightingState } from '../../../api/types';
+import { useAuth } from '../../../auth/auth-context';
 import { hydrateCharacter } from '../../../domain/system';
 import { useBootstrap } from '../../../hooks/useBootstrap';
+import { getDefaultSavedMap, seedDefaultSavedMaps, isDefaultSavedMap } from '../defaultMaps';
 import { createBlankMap } from '../mapFactory';
 import { useTabletopStore } from '../mapStore';
 import type { AvailableTabletopToken } from '../types';
@@ -13,9 +16,10 @@ import type { SaveAreaMeta } from './VttSaveAreaModal';
 
 const CUSTOM_TOKENS_KEY = 'omnivita_vtt_custom_tokens_v1';
 
-export function VttPage() {
+export function VttPage({ playerMode = false }: { playerMode?: boolean } = {}) {
   const queryClient = useQueryClient();
   const location = useLocation();
+  const { session } = useAuth();
   const bootstrap = useBootstrap();
   const map = useTabletopStore((state) => state.map);
   const setMap = useTabletopStore((state) => state.setMap);
@@ -23,6 +27,7 @@ export function VttPage() {
   const [activeSessionBoardId, setActiveSessionBoardId] = useState('');
   const [, setMessage] = useState('Tabletop dedicado pronto.');
   const [customTokens, setCustomTokens] = useState<AvailableTabletopToken[]>(() => readCustomTokens());
+  const applyingRemoteRef = useRef(false);
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
@@ -36,14 +41,32 @@ export function VttPage() {
   }, []);
 
   useEffect(() => {
+    if (playerMode) {
+      useTabletopStore.getState().setMode('session');
+      return;
+    }
     if (location.pathname.endsWith('/session')) useTabletopStore.getState().setMode('session');
     if (location.pathname.endsWith('/build')) useTabletopStore.getState().setMode('build');
-  }, [location.pathname]);
+  }, [location.pathname, playerMode]);
+
+  const ownedCharacterIds = useMemo(() => buildOwnedCharacterIds(session?.user.characterId || '', session?.user.id || '', bootstrap.data?.characters || []), [bootstrap.data?.characters, session?.user.characterId, session?.user.id]);
+
+  useEffect(() => {
+    useTabletopStore.getState().setTabletopIdentity(playerMode ? 'player' : 'gm', session?.user.id || '', ownedCharacterIds);
+  }, [ownedCharacterIds, playerMode, session?.user.id]);
 
   const mapsQuery = useQuery({
     queryKey: ['maps'],
-    queryFn: () => api.listMaps()
+    queryFn: () => api.listMaps(),
+    enabled: !playerMode
   });
+  const activeBoardQuery = useQuery({
+    queryKey: ['session-board-active'],
+    queryFn: () => api.getActiveSessionBoard(),
+    enabled: playerMode,
+    refetchOnWindowFocus: true
+  });
+  const savedMaps = useMemo(() => seedDefaultSavedMaps(mapsQuery.data?.maps || []), [mapsQuery.data?.maps]);
 
   const availableTokens = useMemo(() => buildAvailableTokens(
     bootstrap.data?.characters || [],
@@ -77,9 +100,62 @@ export function VttPage() {
     onError: (error) => setMessage(error instanceof Error ? error.message : 'Falha ao salvar.')
   });
 
+  useEffect(() => {
+    if (!playerMode) return;
+    const board = activeBoardQuery.data?.board;
+    if (!board?.activeMap) return;
+    applyingRemoteRef.current = true;
+    setMap({ ...board.activeMap, mode: 'session' });
+    setActiveSessionBoardId(board.id);
+    clearDirty();
+    window.setTimeout(() => {
+      applyingRemoteRef.current = false;
+    }, 0);
+  }, [activeBoardQuery.data?.board?.id, activeBoardQuery.data?.board?.updatedAt, activeBoardQuery.data?.board, clearDirty, playerMode, setMap]);
+
+  useEffect(() => {
+    if (!playerMode && !location.pathname.endsWith('/session')) return undefined;
+    return subscribeTabletopSessionBoard((board) => {
+      if (!board?.activeMap) return;
+      if (!playerMode && useTabletopStore.getState().dirty) return;
+      applyingRemoteRef.current = true;
+      setMap({ ...board.activeMap, mode: 'session' });
+      setActiveSessionBoardId(board.id);
+      clearDirty();
+      window.setTimeout(() => {
+        applyingRemoteRef.current = false;
+      }, 0);
+    });
+  }, [clearDirty, location.pathname, playerMode, setMap]);
+
+  useEffect(() => {
+    if (!playerMode) return undefined;
+    const timers = new Map<string, number>();
+    const unsubscribe = useTabletopStore.subscribe((state, previous) => {
+      if (applyingRemoteRef.current || state.tabletopRole !== 'player') return;
+      state.map.tokens.forEach((token) => {
+        const previousToken = previous.map.tokens.find((entry) => entry.id === token.id);
+        if (!previousToken || previousToken.x === token.x && previousToken.y === token.y) return;
+        const existingTimer = timers.get(token.id);
+        if (existingTimer) window.clearTimeout(existingTimer);
+        timers.set(token.id, window.setTimeout(() => {
+          api.moveActiveSessionToken(token.id, { x: token.x, y: token.y }).catch((error) => {
+            console.warn('[OmniVita tabletop] Falha ao sincronizar movimento de token.', error);
+            activeBoardQuery.refetch();
+          });
+        }, 250));
+      });
+    });
+    return () => {
+      unsubscribe();
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [activeBoardQuery, playerMode]);
+
   async function handleLoadMap(mapId: string, mode: OmniMap['mode']) {
     try {
-      const result = await api.getMap(mapId);
+      const defaultMap = getDefaultSavedMap(mapId);
+      const result = defaultMap ? { map: defaultMap } : await api.getMap(mapId);
       setMap({ ...stripSessionStateForMap(result.map), mode });
       setActiveSessionBoardId('');
       clearDirty();
@@ -89,17 +165,26 @@ export function VttPage() {
     }
   }
 
-  async function handleAddMap(mapId: string) {
+  async function handleAddMap(mapId: string, placement?: { x: number; y: number }) {
     try {
-      const result = await api.getMap(mapId);
+      const defaultMap = getDefaultSavedMap(mapId);
+      const result = defaultMap ? { map: defaultMap } : await api.getMap(mapId);
       const state = useTabletopStore.getState();
       const offset = (state.map.sessionMapInstances?.length || 0) * state.map.gridSize * 4;
-      state.addSessionMapInstance(stripSessionStateForMap(result.map), offset, 0);
+      const cleanMap = stripSessionStateForMap(result.map);
+      state.addSessionMapInstance(cleanMap, placement?.x ?? offset, placement?.y ?? 0);
       state.setMode('session');
       setMessage('Mapa adicionado ao board.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Falha ao adicionar mapa.');
     }
+  }
+
+  async function handlePrepareMap(mapId: string) {
+    const defaultMap = getDefaultSavedMap(mapId);
+    if (defaultMap) return stripSessionStateForMap(defaultMap);
+    const result = await api.getMap(mapId);
+    return stripSessionStateForMap(result.map);
   }
 
   async function handleSaveMapArea(bounds: MapBounds, meta: SaveAreaMeta) {
@@ -120,6 +205,10 @@ export function VttPage() {
   }
 
   async function handleRenameMap(mapId: string, name: string) {
+    if (isDefaultSavedMap(mapId)) {
+      setMessage('Mapas padrao sao presets. Duplique para renomear.');
+      return;
+    }
     const result = await api.getMap(mapId);
     await api.updateMap(mapId, { ...result.map, name });
     queryClient.invalidateQueries({ queryKey: ['maps'] });
@@ -127,39 +216,53 @@ export function VttPage() {
   }
 
   async function handleDuplicateMap(mapId: string) {
-    const result = await api.getMap(mapId);
+    const defaultMap = getDefaultSavedMap(mapId);
+    const result = defaultMap ? { map: defaultMap } : await api.getMap(mapId);
     await api.createMap({ ...result.map, id: createLocalId('map'), name: `${result.map.name || 'Mapa'} copia` });
     queryClient.invalidateQueries({ queryKey: ['maps'] });
   }
 
   async function handleDeleteMap(mapId: string) {
+    if (isDefaultSavedMap(mapId)) {
+      setMessage('Mapas padrao nao podem ser excluidos.');
+      return;
+    }
     await api.deleteMap(mapId);
     queryClient.invalidateQueries({ queryKey: ['maps'] });
   }
 
   return (
-    <VttShell
-      maps={mapsQuery.data?.maps || []}
-      tokens={availableTokens}
-      customTokens={customTokens}
-      loadingMaps={mapsQuery.isLoading}
-      saving={saveMutation.isPending}
-      onSave={() => saveMutation.mutate()}
-      onSaveMapArea={handleSaveMapArea}
-      onLoadMap={handleLoadMap}
-      onAddMap={handleAddMap}
-      onRenameMap={handleRenameMap}
-      onDuplicateMap={handleDuplicateMap}
-      onDeleteMap={handleDeleteMap}
-      onCreateToken={(token) => {
-        setCustomTokens((current) => {
-          const next = [token, ...current.filter((entry) => entry.id !== token.id)];
-          writeCustomTokens(next);
-          return next;
-        });
-        setMessage(`${token.name} salvo na biblioteca.`);
-      }}
-    />
+    <>
+      <VttShell
+        maps={savedMaps}
+        tokens={availableTokens}
+        customTokens={customTokens}
+        loadingMaps={mapsQuery.isLoading}
+        saving={saveMutation.isPending}
+        onSave={() => saveMutation.mutate()}
+        onSaveMapArea={handleSaveMapArea}
+        onLoadMap={handleLoadMap}
+        onAddMap={handleAddMap}
+        onPrepareMap={handlePrepareMap}
+        onRenameMap={handleRenameMap}
+        onDuplicateMap={handleDuplicateMap}
+        onDeleteMap={handleDeleteMap}
+        onCreateToken={(token) => {
+          setCustomTokens((current) => {
+            const next = [token, ...current.filter((entry) => entry.id !== token.id)];
+            writeCustomTokens(next);
+            return next;
+          });
+          setMessage(`${token.name} salvo na biblioteca.`);
+        }}
+        playerMode={playerMode}
+      />
+      {playerMode && !activeBoardQuery.isLoading && activeBoardQuery.data?.board === null ? (
+        <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-xl border border-white/10 bg-[#12101a]/92 px-4 py-3 text-sm font-bold text-white shadow-soft">
+          Aguardando o mestre iniciar uma sessao.
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -183,33 +286,53 @@ function writeCustomTokens(tokens: AvailableTabletopToken[]) {
 }
 
 function buildAvailableTokens(characters: CharacterSheet[], combatants: Combatant[]): AvailableTabletopToken[] {
-  const characterTokens = characters.map(hydrateCharacter).map((character) => ({
+  const characterTokens = characters.map((sheet) => {
+    const character = hydrateCharacter(sheet);
+    return {
     id: `char-${character.id}`,
     sourceId: character.id,
+    definitionId: `def-char-${character.id}`,
+    ownerUserId: sheet.ownerUserId,
+    ownerCharacterId: character.id,
+    sourceSheetId: character.id,
+    isPlayerToken: true,
     kind: 'character' as const,
     name: character.identity.name || 'Personagem',
     image: character.identity.image,
     hpCurrent: Number(character.resources.pvCurrent || 0),
     hpMax: 0,
     subtitle: `${character.identity.className || 'Player'} Nv ${character.identity.level || 1}`,
-    visibleToPlayers: true
-  }));
+    visibleToPlayers: true,
+    blocksMovement: true
+  };
+  });
 
   const combatTokens = combatants.map((combatant) => ({
     id: `combat-${combatant.instanceId}`,
     sourceId: combatant.instanceId,
+    definitionId: `def-combat-${combatant.instanceId}`,
     kind: combatant.combatantType === 'enemy' ? 'enemy' as const : combatant.combatantType === 'character' ? 'character' as const : 'companion' as const,
     name: combatant.name || 'Combatente',
     image: combatant.image,
     hpCurrent: Number(combatant.pvCurrent || 0),
     hpMax: Number(combatant.pvMax || 0),
     subtitle: combatant.subtitle || combatant.combatantType,
-    visibleToPlayers: combatant.combatantType !== 'enemy'
+    visibleToPlayers: combatant.combatantType !== 'enemy',
+    blocksMovement: combatant.combatantType === 'enemy'
   }));
 
   const byId = new Map<string, AvailableTabletopToken>();
   [...combatTokens, ...characterTokens].forEach((token) => byId.set(token.id, token));
   return Array.from(byId.values());
+}
+
+function buildOwnedCharacterIds(sessionCharacterId: string, userId: string, characters: CharacterSheet[]) {
+  const ids = new Set<string>();
+  if (sessionCharacterId) ids.add(sessionCharacterId);
+  characters.forEach((character) => {
+    if (character.ownerUserId && userId && character.ownerUserId === userId) ids.add(character.id);
+  });
+  return Array.from(ids);
 }
 
 function stripSessionStateForMap(sourceMap: OmniMap): OmniMap {

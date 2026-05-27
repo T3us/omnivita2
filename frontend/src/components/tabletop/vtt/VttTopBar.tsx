@@ -10,7 +10,8 @@ export function VttTopBar({
   onResetCamera,
   onFocusSelection,
   onToggleInspector,
-  onModeChange
+  onModeChange,
+  playerMode = false
 }: {
   saving: boolean;
   zoom: number;
@@ -20,6 +21,7 @@ export function VttTopBar({
   onFocusSelection(): void;
   onToggleInspector(): void;
   onModeChange(mode: 'build' | 'session'): void;
+  playerMode?: boolean;
 }) {
   const map = useTabletopStore((state) => state.map);
   const dirty = useTabletopStore((state) => state.dirty);
@@ -31,10 +33,12 @@ export function VttTopBar({
   return (
     <header className="pointer-events-auto fixed left-[76px] right-4 top-3 z-40 flex h-11 items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#12101a]/88 px-3 text-textMain shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
       <div className="flex min-w-0 items-center gap-3">
-        <Link to="/mestre" className="grid h-8 w-8 place-items-center rounded-lg text-textMuted transition hover:bg-white/10 hover:text-white" title="Voltar ao mestre">
+        <Link to={playerMode ? '/personagem' : '/mestre'} className="grid h-8 w-8 place-items-center rounded-lg text-textMuted transition hover:bg-white/10 hover:text-white" title={playerMode ? 'Voltar ao personagem' : 'Voltar ao mestre'}>
           <ArrowLeft size={17} />
         </Link>
-        {map.mode === 'build' && !map.bounds ? (
+        {playerMode ? (
+          <span className="truncate px-2 text-sm font-black text-white">{map.name || 'Mesa OmniVita'}</span>
+        ) : map.mode === 'build' && !map.bounds ? (
           <span className="truncate px-2 text-sm font-black text-white">Build - area livre</span>
         ) : (
           <input
@@ -44,18 +48,18 @@ export function VttTopBar({
             onChange={(event) => setMapMeta({ name: event.target.value || 'Novo mapa' })}
           />
         )}
-        <span className={`rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${map.mode === 'build' ? 'border-vita/40 bg-vita/20 text-violet' : 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100'}`}>
-          {map.mode === 'build' ? 'Build' : 'Session'}
+        <span className={`rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${playerMode ? 'border-emerald-300/30 bg-emerald-400/10 text-emerald-100' : map.mode === 'build' ? 'border-vita/40 bg-vita/20 text-violet' : 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100'}`}>
+          {playerMode ? 'Player' : map.mode === 'build' ? 'Build' : 'Session'}
         </span>
-        <span className={`hidden rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] sm:inline ${dirty ? 'border-amber-300/30 bg-amber-400/10 text-amber-100' : 'border-emerald-300/25 bg-emerald-400/10 text-emerald-100'}`}>
+        {!playerMode ? <span className={`hidden rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] sm:inline ${dirty ? 'border-amber-300/30 bg-amber-400/10 text-amber-100' : 'border-emerald-300/25 bg-emerald-400/10 text-emerald-100'}`}>
           {saveLabel}
-        </span>
+        </span> : null}
       </div>
       <div className="flex items-center gap-1">
-        {map.mode === 'build' ? (
+        {!playerMode && map.mode === 'build' ? (
           <button type="button" className="grid h-8 w-8 place-items-center rounded-lg text-textMuted hover:bg-white/10 hover:text-white" title="Criar mapa vazio" onClick={onNewMap}><Plus size={16} /></button>
         ) : null}
-        <div className="flex overflow-hidden rounded-lg border border-white/10 bg-white/5">
+        {!playerMode ? <div className="flex overflow-hidden rounded-lg border border-white/10 bg-white/5">
           <button
             type="button"
             className={`px-3 py-1.5 text-xs font-black uppercase transition ${map.mode === 'build' ? 'bg-vita/35 text-white' : 'text-textMuted hover:bg-white/10 hover:text-white'}`}
@@ -72,23 +76,31 @@ export function VttTopBar({
           >
             Session
           </button>
-        </div>
-        <button
+        </div> : null}
+        {!playerMode ? <button
           type="button"
           className="grid h-8 w-8 place-items-center rounded-lg text-textMuted hover:bg-white/10 hover:text-white"
           title="GM / Player Preview"
           onClick={() => setSessionViewMode(viewMode === 'gm' ? 'player-preview' : 'gm')}
         >
           {viewMode === 'gm' ? <Eye size={16} /> : <EyeOff size={16} />}
-        </button>
+        </button> : null}
+        {!playerMode ? <button
+          type="button"
+          className="grid h-8 w-8 place-items-center rounded-lg text-xs font-black text-textMuted hover:bg-white/10 hover:text-white"
+          title="Abrir visao de player"
+          onClick={() => window.open('/tabletop/player', '_blank', 'noopener,noreferrer')}
+        >
+          P
+        </button> : null}
         <button type="button" className="grid h-8 w-8 place-items-center rounded-lg text-textMuted hover:bg-white/10 hover:text-white" title="Focar selecao" onClick={onFocusSelection}><Focus size={16} /></button>
         <button type="button" className="grid h-8 w-8 place-items-center rounded-lg text-textMuted hover:bg-white/10 hover:text-white" title="Resetar camera" onClick={onResetCamera}><RotateCcw size={16} /></button>
         <span className="hidden rounded-lg border border-white/10 px-2 py-1 text-xs font-bold text-textMuted sm:inline">{Math.round(zoom * 100)}%</span>
-        <button type="button" className="grid h-8 w-8 place-items-center rounded-lg text-textMuted hover:bg-white/10 hover:text-white" title="Inspector" onClick={onToggleInspector}>I</button>
-        <button type="button" className="flex h-8 items-center gap-1 rounded-lg px-2 text-textMuted hover:bg-white/10 hover:text-white disabled:opacity-50" title={map.mode === 'build' ? 'Salvar area como mapa' : 'Salvar sessao'} onClick={onSave} disabled={saving}>
+        {!playerMode ? <button type="button" className="grid h-8 w-8 place-items-center rounded-lg text-textMuted hover:bg-white/10 hover:text-white" title="Inspector" onClick={onToggleInspector}>I</button> : null}
+        {!playerMode ? <button type="button" className="flex h-8 items-center gap-1 rounded-lg px-2 text-textMuted hover:bg-white/10 hover:text-white disabled:opacity-50" title={map.mode === 'build' ? 'Salvar area como mapa' : 'Salvar sessao'} onClick={onSave} disabled={saving}>
           <Save size={16} />
           {map.mode === 'build' ? <span className="hidden text-xs font-black sm:inline">Salvar area</span> : null}
-        </button>
+        </button> : null}
       </div>
     </header>
   );

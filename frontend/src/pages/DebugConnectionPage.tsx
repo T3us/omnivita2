@@ -19,9 +19,17 @@ export function DebugConnectionPage() {
     { label: 'Socket', status: 'checking', detail: 'Testando Socket.IO...' }
   ]);
 
+  const href = typeof window !== 'undefined' ? window.location.href : '';
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const apiBase = getRuntimeApiBaseUrl() || origin;
   const token = getAccessToken();
+  const connectionKind = useMemo(() => {
+    if (origin.includes('trycloudflare.com')) return 'Cloudflare Quick Tunnel';
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) return 'Localhost';
+    if (/https?:\/\/(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)/.test(origin)) return 'LAN';
+    return 'Outro';
+  }, [origin]);
+  const buildStamp = 'dev';
   const cloudflareUrl = useMemo(() => (
     origin.includes('trycloudflare.com') ? origin : 'Nao esta em um link trycloudflare.com agora.'
   ), [origin]);
@@ -56,6 +64,17 @@ export function DebugConnectionPage() {
         next.push({ label: 'API', status: 'error', detail: error instanceof Error ? error.message : 'Falha na API.' });
       }
 
+      try {
+        const response = await fetch('/api/bootstrap');
+        next.push({
+          label: 'API bootstrap',
+          status: response.ok || response.status === 401 ? 'ok' : 'warn',
+          detail: `HTTP ${response.status}`
+        });
+      } catch (error) {
+        next.push({ label: 'API bootstrap', status: 'error', detail: error instanceof Error ? error.message : 'Falha em /api/bootstrap.' });
+      }
+
       if (!token) {
         next.push({ label: 'Socket', status: 'warn', detail: 'Sem token de login; entre no OmniVita para testar socket autenticado.' });
         if (!cancelled) setChecks(next);
@@ -64,6 +83,7 @@ export function DebugConnectionPage() {
 
       await new Promise<void>((resolve) => {
         socket = io(getRuntimeApiBaseUrl() || undefined, {
+          path: '/socket.io',
           transports: ['websocket', 'polling'],
           auth: { token },
           timeout: 5000
@@ -90,6 +110,24 @@ export function DebugConnectionPage() {
     };
   }, [token]);
 
+  const diagnostic = [
+    `href=${href}`,
+    `origin=${origin}`,
+    `tipo=${connectionKind}`,
+    `api=${apiBase}`,
+    `cloudflare=${cloudflareUrl}`,
+    `build=${buildStamp}`,
+    ...checks.map((check) => `${check.label}=${check.status} (${check.detail})`)
+  ].join('\n');
+
+  async function copyDiagnostic() {
+    try {
+      await navigator.clipboard.writeText(diagnostic);
+    } catch {
+      window.prompt('Copie o diagnostico:', diagnostic);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-ink p-6 text-textMain">
       <div className="mx-auto grid max-w-4xl gap-4">
@@ -101,9 +139,12 @@ export function DebugConnectionPage() {
 
         <Card>
           <div className="grid gap-3 text-sm">
+            <InfoRow label="Href atual" value={href} />
             <InfoRow label="Origin atual" value={origin} />
+            <InfoRow label="Tipo de acesso" value={connectionKind} />
             <InfoRow label="API usada pelo front" value={apiBase} />
             <InfoRow label="Cloudflare atual" value={cloudflareUrl} />
+            <InfoRow label="Build" value={buildStamp} />
             <InfoRow label="Login/token" value={token ? 'Token encontrado no navegador.' : 'Sem token salvo.'} />
           </div>
         </Card>
@@ -119,6 +160,12 @@ export function DebugConnectionPage() {
             </Card>
           ))}
         </div>
+
+        <Card>
+          <button type="button" className="rounded-lg border border-line bg-white/5 px-4 py-2 text-sm font-bold text-textMain hover:bg-white/10" onClick={copyDiagnostic}>
+            Copiar diagnostico
+          </button>
+        </Card>
       </div>
     </main>
   );

@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import { getAuthSessionFromToken } from './auth.mjs';
 import { getCombatState, scopeCombatStateForUser } from './combat.mjs';
 import { isOriginAllowed } from './config.mjs';
+import { getLatestSessionBoard, sanitizeSessionBoardForUser } from './session-boards.mjs';
 
 function extractBearerToken(value) {
   const header = String(value || '');
@@ -52,6 +53,19 @@ export function attachSocketServer(httpServer) {
         console.error(error);
       }
     });
+
+    socket.on('tabletop:request-session-board', async () => {
+      try {
+        const board = await getLatestSessionBoard();
+        socket.emit('tabletop:session-board', {
+          board: board ? sanitizeSessionBoardForUser(board, socket.data.auth.user) : null,
+          meta: { reason: 'session-board-sync' },
+          sentAt: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    });
   });
 
   return {
@@ -85,7 +99,7 @@ export function attachSocketServer(httpServer) {
     broadcastSessionBoardState(board, meta = {}) {
       io.sockets.sockets.forEach((socket) => {
         socket.emit('tabletop:session-board', {
-          board,
+          board: sanitizeSessionBoardForUser(board, socket.data.auth.user),
           meta,
           sentAt: new Date().toISOString()
         });

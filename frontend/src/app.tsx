@@ -35,6 +35,7 @@ export function App() {
               <Route path="/tabletop" element={<ProtectedRoute role="master"><VttPage /></ProtectedRoute>} />
               <Route path="/tabletop/build" element={<ProtectedRoute role="master"><VttPage /></ProtectedRoute>} />
               <Route path="/tabletop/session" element={<ProtectedRoute role="master"><VttPage /></ProtectedRoute>} />
+              <Route path="/tabletop/player" element={<ProtectedRoute><VttPage playerMode /></ProtectedRoute>} />
               <Route path="/vtt" element={<ProtectedRoute role="master"><VttPage /></ProtectedRoute>} />
               <Route path="/omnivita" element={<ProtectedRoute><OmnitrixPage /></ProtectedRoute>} />
               <Route path="/recuperar" element={<RecoveryPage />} />

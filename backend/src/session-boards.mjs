@@ -86,6 +86,15 @@ export async function getSessionBoardById(boardId, client) {
   return rowToBoard(result.rows[0]);
 }
 
+export async function getLatestSessionBoard(client) {
+  const result = await query(
+    'SELECT id, name, data, created_at, updated_at FROM session_boards ORDER BY updated_at DESC LIMIT 1',
+    [],
+    client
+  );
+  return rowToBoard(result.rows[0]);
+}
+
 export async function createSessionBoard(boardInput, client) {
   const payload = normalizeBoardPayload(boardInput);
   const result = await query(
@@ -127,4 +136,87 @@ export async function deleteSessionBoard(boardId, client) {
     client
   );
   return Boolean(result.rows[0]);
+}
+
+export function canControlSessionToken(user, token = {}) {
+  const role = String(user?.role || '').toLowerCase();
+  if (role === 'master' || role === 'gm') return true;
+  if (token.locked) return false;
+  if (token.hidden || token.visibleToPlayers === false) return false;
+  const userId = String(user?.id || '');
+  const characterId = String(user?.characterId || '');
+  const controlledBy = Array.isArray(token.controlledByUserIds) ? token.controlledByUserIds.map(String) : [];
+  return Boolean(
+    (token.ownerUserId && String(token.ownerUserId) === userId)
+    || (userId && controlledBy.includes(userId))
+    || (token.ownerCharacterId && String(token.ownerCharacterId) === characterId)
+    || (token.formOwnerCharacterId && String(token.formOwnerCharacterId) === characterId)
+    || (token.sourceSheetId && String(token.sourceSheetId) === characterId)
+    || (token.characterId && String(token.characterId) === characterId)
+  );
+}
+
+export function sanitizeSessionBoardForUser(board, user) {
+  if (!board) return null;
+  const role = String(user?.role || '').toLowerCase();
+  if (role === 'master' || role === 'gm') return board;
+
+  const next = JSON.parse(JSON.stringify(board));
+  const activeMap = next.activeMap && typeof next.activeMap === 'object' ? next.activeMap : null;
+  if (!activeMap) return next;
+
+  activeMap.mode = 'session';
+  sanitizeMapDataForPlayer(activeMap);
+  activeMap.sessionMapInstances = safeArray(activeMap.sessionMapInstances)
+    .filter((instance) => instance.visibleToPlayers !== false)
+    .map((instance) => ({ ...instance, data: instance.data ? sanitizeMapDataForPlayer(instance.data) : instance.data }));
+  next.mapInstances = safeArray(next.mapInstances)
+    .filter((instance) => instance.visibleToPlayers !== false)
+    .map((instance) => ({ ...instance, data: instance.data ? sanitizeMapDataForPlayer(instance.data) : instance.data }));
+
+  return next;
+}
+
+function sanitizeMapDataForPlayer(map) {
+  if (!map || typeof map !== 'object') return map;
+  map.mode = 'session';
+  map.tokens = safeArray(map.tokens).filter((token) => token.visibleToPlayers !== false && !token.hidden);
+  filterObjectLayer(map.objectLayer);
+  filterObjectLayer(map.decorationLayer);
+  filterObjectLayer(map.detailLayer);
+  filterObjectLayer(map.mechanicalLayer);
+  filterObjectLayer(map.notesLayer);
+  filterObjectLayer(map.lightingLayer, true);
+  map.areaTemplates = safeArray(map.areaTemplates).filter((template) => template.visibleToPlayers !== false);
+  map.lightingRegions = safeArray(map.lightingRegions).filter((region) => region.visibleToPlayers !== false && !region.gmOnly);
+  if (map.sessionLighting?.regions) {
+    map.sessionLighting.regions = safeArray(map.sessionLighting.regions).filter((region) => region.visibleToPlayers !== false && !region.gmOnly);
+  }
+  return map;
+}
+
+export function moveSessionTokenOnBoard(board, tokenId, x, y, user) {
+  if (!board?.activeMap) return { ok: false, reason: 'missing-board' };
+  const next = JSON.parse(JSON.stringify(board));
+  const token = safeArray(next.activeMap.tokens).find((entry) => String(entry.id) === String(tokenId));
+  if (!token) return { ok: false, reason: 'missing-token' };
+  if (!canControlSessionToken(user, token)) return { ok: false, reason: 'permission' };
+  token.x = Math.round(Number(x || 0));
+  token.y = Math.round(Number(y || 0));
+  next.tokens = safeArray(next.tokens).map((entry) => String(entry.id) === String(tokenId) ? { ...entry, x: token.x, y: token.y } : entry);
+  return { ok: true, board: next, token };
+}
+
+function filterObjectLayer(layer, lightLayer = false) {
+  if (!layer || !Array.isArray(layer.objects)) return;
+  layer.objects = layer.objects.filter((object) => (
+    object.visibleToPlayers !== false
+    && !object.hidden
+    && !object.gmOnly
+    && (!lightLayer || !object.gmOnlyLight)
+  ));
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }

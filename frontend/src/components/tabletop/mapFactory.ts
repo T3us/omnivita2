@@ -340,7 +340,7 @@ function normalizeFogLayer(layer: Partial<FogLayer> | undefined, fallback: FogLa
     selectable: layer?.selectable ?? fallback.selectable ?? false,
     editable: layer?.editable ?? fallback.editable ?? true,
     revealedCells: Array.isArray(layer?.revealedCells)
-      ? layer.revealedCells.map((cell) => ({ x: clampInteger(cell.x, 0, 999), y: clampInteger(cell.y, 0, 999) }))
+      ? layer.revealedCells.map((cell) => ({ x: clampInteger(cell.x, -9999, 9999), y: clampInteger(cell.y, -9999, 9999) }))
       : []
   };
 }
@@ -348,8 +348,8 @@ function normalizeFogLayer(layer: Partial<FogLayer> | undefined, fallback: FogLa
 function normalizeTileCell(cell: Partial<TileCell>) {
   if (!cell || !cell.assetId) return null;
   return {
-    x: clampInteger(cell.x, 0, 999),
-    y: clampInteger(cell.y, 0, 999),
+    x: clampInteger(cell.x, -9999, 9999),
+    y: clampInteger(cell.y, -9999, 9999),
     assetId: String(cell.assetId),
     rotation: normalizeRotation(Number(cell.rotation || 0)),
     footprint: cell.footprint ? { w: clampInteger(cell.footprint.w, 1, 10), h: clampInteger(cell.footprint.h, 1, 10) } : undefined,
@@ -432,11 +432,24 @@ function normalizeToken(token: Partial<TabletopToken>) {
   return {
     id: String(token.id),
     sourceId: String(token.sourceId || token.id),
+    definitionId: token.definitionId ? String(token.definitionId) : undefined,
     characterId: token.characterId ? String(token.characterId) : undefined,
     combatantId: token.combatantId ? String(token.combatantId) : undefined,
+    ownerUserId: token.ownerUserId ? String(token.ownerUserId) : undefined,
+    ownerCharacterId: token.ownerCharacterId ? String(token.ownerCharacterId) : undefined,
+    controlledByUserIds: Array.isArray(token.controlledByUserIds) ? token.controlledByUserIds.map(String).filter(Boolean) : [],
+    formOwnerCharacterId: token.formOwnerCharacterId ? String(token.formOwnerCharacterId) : undefined,
+    sourceSheetId: token.sourceSheetId ? String(token.sourceSheetId) : undefined,
+    sourceFormId: token.sourceFormId ? String(token.sourceFormId) : undefined,
+    isPlayerToken: Boolean(token.isPlayerToken),
+    isFormToken: Boolean(token.isFormToken),
+    isSummonToken: Boolean(token.isSummonToken),
+    blocksMovement: Boolean(token.blocksMovement),
     kind: token.kind || 'npc',
     name: String(token.name || 'Token'),
+    nameOverride: token.nameOverride ? String(token.nameOverride) : undefined,
     image: token.image ? String(token.image) : undefined,
+    color: token.color ? String(token.color) : undefined,
     x: Number(token.x || 0),
     y: Number(token.y || 0),
     controlledBy: token.controlledBy ? String(token.controlledBy) : undefined,

@@ -113,6 +113,7 @@ function PlayerSidebar({
       />
 
       <div className="grid gap-2">
+        <Button type="button" onClick={() => window.open('/tabletop/player', '_blank', 'noopener,noreferrer')}>Abrir Grid/Tabletop</Button>
         <Button type="button" onClick={onLogout}>Sair</Button>
       </div>
     </div>
@@ -125,6 +126,7 @@ function FallbackSidebar({ username, onLogout }: { username: string; onLogout():
       <Badge>Jogador</Badge>
       <h1 className="text-2xl font-black">Painel do personagem</h1>
       <p className="text-sm text-textMuted">Usuario: {username}</p>
+      <Button type="button" onClick={() => window.open('/tabletop/player', '_blank', 'noopener,noreferrer')}>Abrir Grid/Tabletop</Button>
       <Button type="button" onClick={onLogout}>Sair</Button>
     </div>
   );

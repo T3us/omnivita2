@@ -4,11 +4,10 @@ import type { MapTool } from '../../types';
 
 const toolKeys: Record<string, MapTool> = {
   v: 'select',
-  h: 'pan',
+  h: 'move-token',
   t: 'token',
   f: 'fog',
   l: 'light',
-  d: 'door',
   m: 'measure',
   p: 'ping',
   n: 'note'
@@ -19,19 +18,27 @@ export function useVttKeyboard({
   onToggleInspector,
   onOpenCommandPalette,
   onCloseFloating,
-  onResetCamera
+  onResetCamera,
+  onPanBy
 }: {
   onToggleAssets(): void;
   onToggleInspector(): void;
   onOpenCommandPalette(): void;
   onCloseFloating(): void;
   onResetCamera(): void;
+  onPanBy(dx: number, dy: number): void;
 }) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (shouldIgnore(event)) return;
       const key = event.key.toLowerCase();
       const meta = event.ctrlKey || event.metaKey;
+      const pan = keyboardPanDelta(event);
+      if (pan) {
+        event.preventDefault();
+        onPanBy(pan.x, pan.y);
+        return;
+      }
       if (meta && key === 'k') {
         event.preventDefault();
         onOpenCommandPalette();
@@ -44,11 +51,6 @@ export function useVttKeyboard({
       }
       if (key === 'b') {
         onToggleAssets();
-        return;
-      }
-      if (key === 'a') {
-        const mode = useTabletopStore.getState().map.mode;
-        if (mode === 'session') useTabletopStore.getState().setTool('template');
         return;
       }
       if (key === 'i') {
@@ -79,7 +81,19 @@ export function useVttKeyboard({
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onCloseFloating, onOpenCommandPalette, onResetCamera, onToggleAssets, onToggleInspector]);
+  }, [onCloseFloating, onOpenCommandPalette, onPanBy, onResetCamera, onToggleAssets, onToggleInspector]);
+}
+
+function keyboardPanDelta(event: KeyboardEvent) {
+  const key = event.key.toLowerCase();
+  const fast = event.shiftKey ? 2.2 : 1;
+  const slow = event.ctrlKey || event.metaKey ? 0.35 : 1;
+  const step = Math.round(64 * fast * slow);
+  if (key === 'arrowleft' || key === 'a') return { x: step, y: 0 };
+  if (key === 'arrowright' || key === 'd') return { x: -step, y: 0 };
+  if (key === 'arrowup' || key === 'w') return { x: 0, y: step };
+  if (key === 'arrowdown' || key === 's') return { x: 0, y: -step };
+  return null;
 }
 
 function deleteSelection() {

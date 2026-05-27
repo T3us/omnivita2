@@ -1,5 +1,6 @@
 import { Eye, EyeOff, Lock, Unlock, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useBootstrap } from '../../../hooks/useBootstrap';
 import { useTabletopStore } from '../mapStore';
 import type { SessionSelectedEntity } from '../types';
 
@@ -17,6 +18,9 @@ export function VttInspectorPanel({
   const duplicateSessionMapInstance = useTabletopStore((state) => state.duplicateSessionMapInstance);
   const removeSessionMapInstance = useTabletopStore((state) => state.removeSessionMapInstance);
   const removeToken = useTabletopStore((state) => state.removeToken);
+  const role = useTabletopStore((state) => state.tabletopRole);
+  const bootstrap = useBootstrap();
+  const characters = bootstrap.data?.characters || [];
   const [tab, setTab] = useState<'inspector' | 'scene' | 'layers'>('inspector');
   const primary = selectedEntities[0] || null;
   const resolved = useMemo(() => primary ? resolveSelection(map, primary) : null, [map, primary]);
@@ -46,9 +50,44 @@ export function VttInspectorPanel({
               <InspectorTitle entity={primary} title={resolved.title} subtitle={resolved.subtitle} />
               {primary?.type === 'token' && resolved.kind === 'token' ? (
                 <div className="grid gap-2">
+                  {role === 'gm' ? (
+                    <div className="grid gap-2 rounded-lg border border-white/10 bg-white/5 p-3">
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-violet">Controle / Dono</p>
+                      <label className="grid gap-1 text-xs font-bold text-textMuted">
+                        Personagem vinculado
+                        <select
+                          className="h-9 rounded-lg border border-white/10 bg-black/20 px-2 text-sm text-white outline-none focus:border-vita/50"
+                          value={resolved.item.ownerCharacterId || resolved.item.characterId || ''}
+                          onChange={(event) => {
+                            const character = characters.find((entry) => entry.id === event.target.value);
+                            updateToken(resolved.item.id, {
+                              ownerCharacterId: character?.id || undefined,
+                              ownerUserId: character?.ownerUserId || undefined,
+                              sourceSheetId: character?.id || resolved.item.sourceSheetId,
+                              isPlayerToken: Boolean(character) || resolved.item.isPlayerToken
+                            });
+                          }}
+                        >
+                          <option value="">Sem dono</option>
+                          {characters.map((character) => (
+                            <option key={character.id} value={character.id}>{character.identity?.name || character.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <TextInput label="Dono userId" value={resolved.item.ownerUserId || ''} onChange={(ownerUserId) => updateToken(resolved.item.id, { ownerUserId: ownerUserId || undefined })} />
+                      <TextInput
+                        label="Controlado por userIds"
+                        value={(resolved.item.controlledByUserIds || []).join(', ')}
+                        onChange={(value) => updateToken(resolved.item.id, { controlledByUserIds: value.split(',').map((entry) => entry.trim()).filter(Boolean) })}
+                      />
+                      <ToggleRow label="Token de player" enabled={Boolean(resolved.item.isPlayerToken)} onClick={() => updateToken(resolved.item.id, { isPlayerToken: !resolved.item.isPlayerToken })} />
+                      <ToggleRow label="Forma / mini ficha" enabled={Boolean(resolved.item.isFormToken)} onClick={() => updateToken(resolved.item.id, { isFormToken: !resolved.item.isFormToken })} />
+                    </div>
+                  ) : null}
                   <ToggleRow label="Visivel aos players" enabled={resolved.item.visibleToPlayers} onClick={() => updateToken(resolved.item.id, { visibleToPlayers: !resolved.item.visibleToPlayers })} />
                   <ToggleRow label="Oculto" enabled={Boolean(resolved.item.hidden)} onClick={() => updateToken(resolved.item.id, { hidden: !resolved.item.hidden })} />
                   <ToggleRow label="Travado" enabled={Boolean(resolved.item.locked)} onClick={() => updateToken(resolved.item.id, { locked: !resolved.item.locked })} />
+                  <ToggleRow label="Bloqueia movimento" enabled={Boolean(resolved.item.blocksMovement)} onClick={() => updateToken(resolved.item.id, { blocksMovement: !resolved.item.blocksMovement })} />
                   <button type="button" className="rounded-lg border border-red-500/30 px-3 py-2 text-left text-sm font-bold text-red-200 hover:bg-red-500/10" onClick={() => removeToken(resolved.item.id)}>Remover token</button>
                 </div>
               ) : null}
@@ -90,6 +129,15 @@ function ToggleRow({ label, enabled, onClick }: { label: string; enabled: boolea
       <span>{label}</span>
       {enabled ? <Eye size={16} className="text-vita" /> : <EyeOff size={16} />}
     </button>
+  );
+}
+
+function TextInput({ label, value, onChange }: { label: string; value: string; onChange(value: string): void }) {
+  return (
+    <label className="grid gap-1 text-xs font-bold text-textMuted">
+      {label}
+      <input className="h-9 rounded-lg border border-white/10 bg-black/20 px-2 text-sm text-white outline-none focus:border-vita/50" value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
   );
 }
 

@@ -39,6 +39,7 @@ import type {
   TabletopMode,
   TabletopToken,
   TabletopTokenKind,
+  TokenDefinition,
   TileCell,
   TileLayer,
   TileLayerKey,
@@ -86,6 +87,7 @@ export type {
   TabletopMode,
   TabletopToken,
   TabletopTokenKind,
+  TokenDefinition,
   TileCell,
   TileLayer,
   TileLayerKey,
@@ -106,9 +108,23 @@ export type SessionSelectedEntity =
 export interface AvailableTabletopToken {
   id: string;
   sourceId: string;
+  definitionId?: string;
+  ownerUserId?: string;
+  ownerCharacterId?: string;
+  controlledByUserIds?: string[];
+  formOwnerCharacterId?: string;
+  sourceSheetId?: string;
+  sourceFormId?: string;
+  isPlayerToken?: boolean;
+  isFormToken?: boolean;
+  isMiniSheetToken?: boolean;
+  isSummonToken?: boolean;
+  blocksMovement?: boolean;
   kind: TabletopTokenKind;
   name: string;
   image?: string;
+  color?: string;
+  notes?: string;
   hpCurrent?: number;
   hpMax?: number;
   subtitle?: string;

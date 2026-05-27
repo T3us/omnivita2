@@ -1,31 +1,44 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type { Asset, AvailableTabletopToken, MapObject, OmniMap, SessionMapInstance, SessionSelectedEntity, TabletopToken, TileLayer } from '../types';
 import { getAsset } from '../assets';
-import { useTabletopStore } from '../mapStore';
+import { useTabletopStore, type TokenMoveCheck } from '../mapStore';
 import { useVttCamera, type VttCamera, type VttPoint } from './hooks/useVttCamera';
 import { useVttHitTesting, type VttRect } from './hooks/useVttHitTesting';
 import { useVttInputController } from './hooks/useVttInputController';
 import type { PointerIntent } from './hooks/useVttInputController';
 import { useVttSelection } from './hooks/useVttSelection';
+import { ProceduralObject, ProceduralTile, type ProceduralRenderQuality } from './assetRenderer';
+
+const EMPTY_SELECTED_KEYS = new Set<string>();
+const TILE_CHUNK_SIZE = 8;
+
+type TileChunkData = {
+  key: string;
+  bounds: VttRect;
+  cells: TileLayer['cells'];
+};
 
 export interface VttCanvasControls {
   camera: VttCamera;
   resetCamera(): void;
   focusSelection(): void;
+  panBy(dx: number, dy: number): void;
 }
 
 interface VttCanvasProps {
   heldAssetId: string;
   heldToken: AvailableTabletopToken | null;
+  heldMapData: OmniMap | null;
   clearHeld(): void;
+  onPlaceHeldMap?(x: number, y: number): void;
   onMapCapture?(bounds: NonNullable<OmniMap['bounds']>): void;
   onControlsReady?(controls: VttCanvasControls): void;
   onCursorWorldChange?(point: VttPoint): void;
   onInputStateChange?(state: { pointerIntent: PointerIntent; isPointerDown: boolean; activePointerId: number | null }): void;
 }
 
-export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onControlsReady, onCursorWorldChange, onInputStateChange }: VttCanvasProps) {
+export function VttCanvas({ heldAssetId, heldToken, heldMapData, clearHeld, onPlaceHeldMap, onMapCapture, onControlsReady, onCursorWorldChange, onInputStateChange }: VttCanvasProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [inputDebugOpen, setInputDebugOpen] = useState(false);
@@ -36,7 +49,11 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
   const sessionFogEnabled = useTabletopStore((state) => state.sessionFogEnabled);
   const sessionGlobalDarkness = useTabletopStore((state) => state.sessionGlobalDarkness);
   const selectedEntities = useTabletopStore((state) => state.selectedEntities);
+  const lastTokenMoveCheck = useTabletopStore((state) => state.lastTokenMoveCheck);
   const { selectedKeys } = useVttSelection();
+  const debugPerf = useMemo(() => new URLSearchParams(window.location.search).get('debugPerf') === '1', []);
+  const debugCollision = useMemo(() => new URLSearchParams(window.location.search).get('debugCollision') === '1', []);
+  const debugToken = useMemo(() => new URLSearchParams(window.location.search).get('debugToken') === '1', []);
   const camera = useVttCamera();
   const hitTesting = useVttHitTesting(map, viewMode);
   const input = useVttInputController({
@@ -51,7 +68,10 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
     isPanningRef: camera.isPanningRef,
     heldAssetId,
     heldToken,
+    heldMapData,
+    publishPointerState: inputDebugOpen || debugPerf || debugCollision || debugToken || Boolean(onCursorWorldChange),
     clearHeld,
+    onPlaceHeldMap,
     onMapCapture
   });
 
@@ -75,9 +95,10 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
     onControlsReady?.({
       camera: camera.camera,
       resetCamera: camera.resetCamera,
-      focusSelection
+      focusSelection,
+      panBy: camera.panBy
     });
-  }, [camera.camera, camera.resetCamera, focusSelection, onControlsReady]);
+  }, [camera.camera, camera.panBy, camera.resetCamera, focusSelection, onControlsReady]);
 
   useEffect(() => {
     onCursorWorldChange?.(input.cursorWorld);
@@ -88,10 +109,24 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
   }, [input.activePointerId, input.isPointerDown, input.pointerIntent, onInputStateChange]);
 
   const gridLines = useMemo(() => buildGridLines(camera.camera, viewport, map.gridSize), [camera.camera, viewport, map.gridSize]);
+  const viewportWorldBounds = useMemo(() => getViewportWorldBounds(camera.camera, viewport, map.gridSize), [camera.camera, viewport, map.gridSize]);
   const selectionRects = selectedEntities
     .map((entity) => ({ entity, rect: hitTesting.getEntityBounds(entity) }))
     .filter((entry): entry is { entity: SessionSelectedEntity; rect: VttRect } => Boolean(entry.rect));
-  const showBaseMap = map.mode === 'build' || !(map.sessionMapInstances || []).length;
+  const sortedMapInstances = useMemo(() => (
+    (map.sessionMapInstances || [])
+      .filter((instance) => viewMode === 'gm' || instance.visibleToPlayers !== false)
+      .slice()
+      .sort((left, right) => Number(left.zIndex || 0) - Number(right.zIndex || 0))
+  ), [map.sessionMapInstances, viewMode]);
+  const visibleMapInstances = useMemo(() => sortedMapInstances.filter((instance) => {
+    if (selectedKeys.has(`map:${instance.id}`)) return true;
+    return rectsIntersect(getMapInstanceWorldBounds(instance), viewportWorldBounds);
+  }), [selectedKeys, sortedMapInstances, viewportWorldBounds]);
+  const showBaseMap = map.mode === 'build' || !(map.sessionMapInstances || []).length || mapHasRenderableTiles(map);
+  const tileQuality: ProceduralRenderQuality = camera.camera.zoom < 0.85 || map.mode === 'session' ? 'fast' : 'quality';
+  const fps = useApproxFps(debugPerf);
+  const renderStats = useMemo(() => debugPerf ? buildRenderStats(map, showBaseMap, visibleMapInstances, viewportWorldBounds) : null, [debugPerf, map, showBaseMap, visibleMapInstances, viewportWorldBounds]);
 
   return (
     <div
@@ -107,7 +142,7 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
         onPointerUp={input.handlePointerUp}
         onPointerCancel={input.handlePointerCancel}
         onMouseLeave={(event) => {
-          if (event.evt.buttons === 0) input.cancelPointerAction();
+          if (event.evt.buttons === 0 && !input.isPointerDown) input.cancelPointerAction();
         }}
         onContextMenu={input.handleContextMenu}
         onWheel={(event) => {
@@ -117,7 +152,7 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
           const multiplier = event.evt.deltaY > 0 ? 0.9 : 1.1;
           camera.zoomAt(pointer, camera.camera.zoom * multiplier);
         }}
-        className={input.pointerIntent === 'panningCamera' || camera.isPanning ? 'cursor-grabbing' : tool === 'pan' ? 'cursor-grab' : tool === 'frame' || heldAssetId || heldToken ? 'cursor-crosshair' : 'cursor-default'}
+        className={input.pointerIntent === 'panningCamera' || camera.isPanning ? 'cursor-grabbing' : tool === 'pan' ? 'cursor-grab' : tool === 'move-token' ? 'cursor-pointer' : tool === 'frame' || heldAssetId || heldToken || heldMapData ? 'cursor-crosshair' : 'cursor-default'}
       >
         <Layer listening={false}>
           <Rect x={0} y={0} width={viewport.width} height={viewport.height} fill="#07040d" />
@@ -133,15 +168,21 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
 
         <Layer>
           <Group x={camera.camera.x} y={camera.camera.y} scaleX={camera.camera.zoom} scaleY={camera.camera.zoom}>
-            {showBaseMap ? <MapBody map={map} origin={{ x: 0, y: 0 }} selected={selectedKeys.has('map:base-map')} /> : null}
+            {showBaseMap ? <MapBody map={map} origin={{ x: 0, y: 0 }} selected={selectedKeys.has('map:base-map')} viewportBounds={viewportWorldBounds} keyPrefix="base" quality={tileQuality} /> : null}
             {map.mode === 'build' && map.bounds ? <MapFrameOverlay map={map} zoom={camera.camera.zoom} /> : null}
-            {(map.sessionMapInstances || [])
-              .slice()
-              .sort((left, right) => Number(left.zIndex || 0) - Number(right.zIndex || 0))
-              .map((instance) => <MapInstanceNode key={instance.id} instance={instance} selected={selectedKeys.has(`map:${instance.id}`)} />)}
-            <ObjectLayer map={map} selectedKeys={selectedKeys} />
+            {visibleMapInstances.map((instance) => (
+              <MapInstanceNode
+                key={instance.id}
+                instance={instance}
+                selected={selectedKeys.has(`map:${instance.id}`)}
+                viewportBounds={viewportWorldBounds}
+                previewPosition={input.dragPreview.mapPositions[instance.id]}
+                quality={tileQuality}
+              />
+            ))}
+            <ObjectLayer map={map} selectedKeys={selectedKeys} viewportBounds={viewportWorldBounds} keyPrefix="base-object" />
             <TemplateLayer map={map} selectedKeys={selectedKeys} />
-            <TokenLayer map={map} viewMode={viewMode} selectedKeys={selectedKeys} />
+            <TokenLayer map={map} viewMode={viewMode} selectedKeys={selectedKeys} viewportBounds={viewportWorldBounds} previewPositions={input.dragPreview.tokenPositions} />
             {selectionRects.map(({ entity, rect }) => (
               <Rect
                 key={`selection-${entity.type}-${entity.id}`}
@@ -170,6 +211,7 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
             {input.pings.map((ping) => (
               <Circle key={ping.id} x={ping.x} y={ping.y} radius={18} stroke="#60a5fa" strokeWidth={3 / camera.camera.zoom} fill="rgba(96,165,250,0.2)" listening={false} />
             ))}
+            {heldMapData ? <HeldMapPreview map={heldMapData} point={snapPointToGrid(input.cursorWorld, heldMapData.gridSize || map.gridSize)} zoom={camera.camera.zoom} /> : null}
           </Group>
         </Layer>
 
@@ -197,6 +239,8 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
           ) : null}
         </Layer>
       </Stage>
+      {debugPerf && renderStats ? <VttPerfDebug stats={renderStats} fps={fps} viewportBounds={viewportWorldBounds} /> : null}
+      {(debugCollision || debugToken) && lastTokenMoveCheck ? <VttCollisionDebug check={lastTokenMoveCheck} /> : null}
       <div className="pointer-events-auto fixed left-[76px] top-[54px] z-40">
         <button
           type="button"
@@ -216,6 +260,7 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
               <span>Target</span><span className="text-white">{input.debug.targetEntity}</span>
               <span>Cell</span><span className="text-white">{input.debug.cell.x}, {input.debug.cell.y}</span>
               <span>Stroke</span><span className="text-white">{input.debug.paintStrokeCellCount}</span>
+              <span>Drag</span><span className="text-white">{input.debug.dragCommitCount}</span>
               <span>Measure</span><span className="text-white">{String(input.debug.measureActive)}</span>
               <span>Box</span><span className="text-white">{String(input.debug.boxSelectActive)}</span>
               <span>Camera</span><span className="text-white">{Math.round(camera.camera.x)}, {Math.round(camera.camera.y)} / {camera.camera.zoom.toFixed(2)}</span>
@@ -227,46 +272,143 @@ export function VttCanvas({ heldAssetId, heldToken, clearHeld, onMapCapture, onC
   );
 }
 
-function MapInstanceNode({ instance, selected }: { instance: SessionMapInstance; selected: boolean }) {
-  const data = instance.data;
+function VttCollisionDebug({ check }: { check: TokenMoveCheck }) {
   return (
-    <Group opacity={instance.opacity ?? 1}>
-      {data ? <MapBody map={data} origin={{ x: instance.x, y: instance.y }} selected={selected} /> : null}
+    <div className="pointer-events-none fixed right-4 top-[54px] z-50 w-72 rounded-xl border border-amber-300/25 bg-[#100c18]/92 p-3 text-[11px] font-semibold text-vitaMuted shadow-soft backdrop-blur">
+      <div className="mb-1 text-xs font-black uppercase tracking-wide text-amber-100">Collision</div>
+      <div className="grid grid-cols-[108px_1fr] gap-x-2 gap-y-1">
+        <span>OK</span><span className={check.ok ? 'text-emerald-200' : 'text-red-200'}>{String(check.ok)}</span>
+        <span>Motivo</span><span className="text-white">{check.reason || '-'}</span>
+        <span>Token</span><span className="truncate text-white">{check.tokenName || check.tokenId || '-'}</span>
+        <span>Role</span><span className="text-white">{check.userRole || '-'}</span>
+        <span>Tabletop</span><span className="text-white">{check.tabletopRole || '-'}</span>
+        <span>View</span><span className="text-white">{check.viewMode || '-'}</span>
+        <span>Origem</span><span className="text-white">{check.currentCell ? `${check.currentCell.x}, ${check.currentCell.y}` : '-'}</span>
+        <span>Destino</span><span className="text-white">{check.targetCell ? `${check.targetCell.x}, ${check.targetCell.y}` : '-'}</span>
+        <span>Controla</span><span className="text-white">{check.canControl === undefined ? '-' : String(check.canControl)}</span>
+        <span>Travado</span><span className="text-white">{String(Boolean(check.locked))}</span>
+        <span>Bloqueios</span><span className="truncate text-white">{check.blockers?.join(', ') || '-'}</span>
+      </div>
+    </div>
+  );
+}
+
+const MapInstanceNode = memo(function MapInstanceNode({ instance, selected, viewportBounds, previewPosition, quality }: { instance: SessionMapInstance; selected: boolean; viewportBounds: VttRect; previewPosition?: VttPoint; quality: ProceduralRenderQuality }) {
+  const data = instance.data;
+  const strokeWidth = selected ? 2.5 : 0;
+  const x = previewPosition?.x ?? instance.x;
+  const y = previewPosition?.y ?? instance.y;
+  useEffect(() => {
+    if (isVttDebugEnabled() && data && !mapHasRenderableTiles(data)) {
+      console.debug('[OmniVita VTT] Mapa de sessao sem tiles renderizaveis.', { id: instance.id, name: instance.name });
+    }
+  }, [data, instance.id, instance.name]);
+  return (
+    <Group x={x} y={y} rotation={instance.rotation || 0} opacity={instance.opacity ?? 1} listening={false}>
+      {data ? (
+        <MapBody
+          map={data}
+          origin={{ x: 0, y: 0 }}
+          selected={selected}
+          viewportBounds={translateRect(viewportBounds, -x, -y)}
+          keyPrefix={`instance:${instance.id}`}
+          quality={quality}
+          includeObjects
+        />
+      ) : null}
+      {selected ? (
+        <>
+          <Rect
+            x={0}
+            y={0}
+            width={instance.width * instance.gridSize}
+            height={instance.height * instance.gridSize}
+            stroke={instance.locked ? '#fbbf24' : '#c4b5fd'}
+            strokeWidth={strokeWidth}
+            dash={instance.locked ? [10, 5] : undefined}
+            listening={false}
+          />
+          <Text
+            x={8}
+            y={8}
+            text={`${instance.locked ? 'LOCK ' : ''}${instance.name}`}
+            fill="#f4efff"
+            fontSize={12}
+            fontStyle="bold"
+            padding={5}
+            listening={false}
+          />
+        </>
+      ) : null}
+    </Group>
+  );
+});
+
+function HeldMapPreview({ map, point, zoom }: { map: OmniMap; point: VttPoint; zoom: number }) {
+  return (
+    <Group x={point.x} y={point.y} opacity={0.66} listening={false}>
+      <MapBody map={map} origin={{ x: 0, y: 0 }} selected={false} keyPrefix="held-map" quality="fast" includeObjects />
       <Rect
-        x={instance.x}
-        y={instance.y}
-        width={instance.width * instance.gridSize}
-        height={instance.height * instance.gridSize}
-        stroke={selected ? '#c4b5fd' : instance.locked ? '#4c3d66' : '#6d5a90'}
-        strokeWidth={selected ? 3 : 1.4}
-        dash={instance.locked ? [10, 5] : undefined}
+        x={0}
+        y={0}
+        width={map.width * map.gridSize}
+        height={map.height * map.gridSize}
+        stroke="#93c5fd"
+        strokeWidth={2 / zoom}
+        dash={[8 / zoom, 5 / zoom]}
+        fill="rgba(147,197,253,0.08)"
         listening={false}
       />
       <Text
-        x={instance.x + 8}
-        y={instance.y + 8}
-        text={`${instance.locked ? 'LOCK ' : ''}${instance.name}`}
-        fill="#f4efff"
-        fontSize={12}
+        x={8 / zoom}
+        y={8 / zoom}
+        text={map.name}
+        fill="#e0f2fe"
+        fontSize={12 / zoom}
         fontStyle="bold"
-        padding={5}
         listening={false}
       />
     </Group>
   );
 }
 
-function MapBody({ map, origin, selected }: { map: OmniMap; origin: VttPoint; selected: boolean }) {
-  void selected;
-  return (
-    <Group>
-      <TileLayerNode layer={map.tileLayers.floor} map={map} origin={origin} opacity={0.94} />
-      <TileLayerNode layer={map.tileLayers.walls} map={map} origin={origin} opacity={1} />
-      <TileLayerNode layer={map.tileLayers.doors} map={map} origin={origin} opacity={1} />
-      <TileLayerNode layer={map.tileLayers.collision} map={map} origin={origin} opacity={0.35} />
-    </Group>
+function mapHasRenderableTiles(map: OmniMap) {
+  return Boolean(
+    map.tileLayers.floor.cells.length
+    || map.tileLayers.walls.cells.length
+    || map.tileLayers.doors.cells.length
+    || map.tileLayers.collision.cells.length
   );
 }
+
+function isVttDebugEnabled() {
+  try {
+    return window.localStorage.getItem('omnivita-vtt-debug') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function snapPointToGrid(point: VttPoint, gridSize: number) {
+  const size = Math.max(1, gridSize);
+  return {
+    x: Math.round(point.x / size) * size,
+    y: Math.round(point.y / size) * size
+  };
+}
+
+const MapBody = memo(function MapBody({ map, origin, selected, viewportBounds, keyPrefix, quality, includeObjects = false }: { map: OmniMap; origin: VttPoint; selected: boolean; viewportBounds?: VttRect; keyPrefix: string; quality: ProceduralRenderQuality; includeObjects?: boolean }) {
+  void selected;
+  return (
+    <Group x={origin.x} y={origin.y} listening={false}>
+      <TileLayerNode layer={map.tileLayers.floor} map={map} viewportBounds={viewportBounds} opacity={0.94} keyPrefix={keyPrefix} quality={quality} />
+      <TileLayerNode layer={map.tileLayers.walls} map={map} viewportBounds={viewportBounds} opacity={1} keyPrefix={keyPrefix} quality={quality} />
+      <TileLayerNode layer={map.tileLayers.doors} map={map} viewportBounds={viewportBounds} opacity={1} keyPrefix={keyPrefix} quality={quality} />
+      <TileLayerNode layer={map.tileLayers.collision} map={map} viewportBounds={viewportBounds} opacity={0.35} keyPrefix={keyPrefix} quality="fast" />
+      {includeObjects ? <ObjectLayer map={map} selectedKeys={EMPTY_SELECTED_KEYS} viewportBounds={viewportBounds} keyPrefix={`${keyPrefix}:object`} /> : null}
+    </Group>
+  );
+});
 
 function MapFrameOverlay({ map, zoom }: { map: OmniMap; zoom: number }) {
   const bounds = map.bounds || { x: 0, y: 0, width: map.width, height: map.height };
@@ -310,44 +452,114 @@ function MapFrameOverlay({ map, zoom }: { map: OmniMap; zoom: number }) {
   );
 }
 
-function TileLayerNode({ layer, map, origin, opacity }: { layer: TileLayer; map: OmniMap; origin: VttPoint; opacity: number }) {
+const TileLayerNode = memo(function TileLayerNode({ layer, map, viewportBounds, opacity, keyPrefix, quality }: { layer: TileLayer; map: OmniMap; viewportBounds?: VttRect; opacity: number; keyPrefix: string; quality: ProceduralRenderQuality }) {
+  const chunks = useMemo(() => buildTileChunks(layer, map), [layer, map]);
+  const visibleChunks = useMemo(() => (
+    viewportBounds ? chunks.filter((chunk) => rectsIntersect(chunk.bounds, viewportBounds)) : chunks
+  ), [chunks, viewportBounds]);
   if (!layer.visible) return null;
   return (
     <Group opacity={(layer.opacity ?? 1) * opacity} listening={false}>
-      {layer.cells.map((cell) => {
+      {visibleChunks.map((chunk) => (
+        <TileChunk key={`${keyPrefix}:${layer.key}:${chunk.key}`} chunk={chunk} layer={layer} map={map} keyPrefix={keyPrefix} quality={quality} />
+      ))}
+    </Group>
+  );
+});
+
+const TileChunk = memo(function TileChunk({ chunk, layer, map, keyPrefix, quality }: { chunk: TileChunkData; layer: TileLayer; map: OmniMap; keyPrefix: string; quality: ProceduralRenderQuality }) {
+  return (
+    <Group listening={false}>
+      {chunk.cells.map((cell) => {
         const asset = getAsset(cell.assetId, map.tilesets);
         const width = (cell.footprint?.w || asset?.gridFootprint?.w || 1) * map.gridSize;
         const height = (cell.footprint?.h || asset?.gridFootprint?.h || 1) * map.gridSize;
         return (
-          <Rect
-            key={`${layer.key}-${cell.x}-${cell.y}-${cell.assetId}`}
-            x={origin.x + cell.x * map.gridSize}
-            y={origin.y + cell.y * map.gridSize}
+          <ProceduralTile
+            key={`${keyPrefix}:${layer.key}:${cell.x}:${cell.y}:${cell.assetId}`}
+            asset={asset || fallbackAsset(layer.key, cell.assetId, width, height)}
+            x={cell.x * map.gridSize}
+            y={cell.y * map.gridSize}
             width={width}
             height={height}
-            fill={asset?.color || layerColor(layer.key)}
-            stroke={asset?.stroke || layerStroke(layer.key)}
-            strokeWidth={layer.key === 'walls' ? 2 : 1}
             rotation={cell.rotation || 0}
+            strokeWidth={layer.key === 'walls' ? 2 : 1}
+            quality={quality}
           />
         );
       })}
     </Group>
   );
+});
+
+function buildTileChunks(layer: TileLayer, map: OmniMap): TileChunkData[] {
+  const chunks = new Map<string, TileChunkData>();
+  layer.cells.forEach((cell) => {
+    const asset = getAsset(cell.assetId, map.tilesets);
+    const widthCells = cell.footprint?.w || asset?.gridFootprint?.w || 1;
+    const heightCells = cell.footprint?.h || asset?.gridFootprint?.h || 1;
+    const chunkX = Math.floor(cell.x / TILE_CHUNK_SIZE);
+    const chunkY = Math.floor(cell.y / TILE_CHUNK_SIZE);
+    const key = `${chunkX}:${chunkY}`;
+    const cellBounds = {
+      x: cell.x * map.gridSize,
+      y: cell.y * map.gridSize,
+      width: widthCells * map.gridSize,
+      height: heightCells * map.gridSize
+    };
+    const existing = chunks.get(key);
+    if (!existing) {
+      chunks.set(key, { key, bounds: cellBounds, cells: [cell] });
+      return;
+    }
+    existing.cells.push(cell);
+    existing.bounds = combineTwoRects(existing.bounds, cellBounds);
+  });
+  return Array.from(chunks.values());
 }
 
-function ObjectLayer({ map, selectedKeys }: { map: OmniMap; selectedKeys: Set<string> }) {
+function fallbackAsset(layerKey: TileLayer['key'], assetId: string, width: number, height: number): Asset {
+  return {
+    id: assetId || `${layerKey}-fallback`,
+    name: layerKey,
+    category: layerKey,
+    typeCategory: layerKey === 'floor' ? 'floor' : layerKey === 'walls' ? 'wall' : layerKey === 'doors' ? 'door' : 'prop',
+    tags: [],
+    imageUrl: '',
+    thumbnailUrl: '',
+    defaultLayer: layerKey,
+    defaultWidth: width,
+    defaultHeight: height,
+    defaultBlocksMovement: layerKey === 'walls',
+    defaultBlocksVision: layerKey === 'walls',
+    defaultGivesCover: false,
+    color: layerColor(layerKey),
+    stroke: layerStroke(layerKey)
+  };
+}
+
+const ObjectLayer = memo(function ObjectLayer({ map, selectedKeys, viewportBounds, keyPrefix }: { map: OmniMap; selectedKeys: Set<string>; viewportBounds?: VttRect; keyPrefix: string }) {
+  const objects = useMemo(() => (
+    getAllObjects(map)
+      .filter((object) => isFiniteNumber(object.x) && isFiniteNumber(object.y))
+      .filter((object) => !viewportBounds || rectsIntersect(getObjectRect(object), viewportBounds))
+      .sort((left, right) => Number(left.zIndex || 0) - Number(right.zIndex || 0))
+  ), [map, viewportBounds]);
   return (
     <>
-      {getAllObjects(map)
-        .filter((object) => isFiniteNumber(object.x) && isFiniteNumber(object.y))
-        .sort((left, right) => Number(left.zIndex || 0) - Number(right.zIndex || 0))
-        .map((object) => <ObjectNode key={object.id} object={object} asset={getAsset(object.assetId, map.tilesets)} selected={selectedKeys.has(`${object.kind === 'light' ? 'light' : 'object'}:${object.id}`)} />)}
+      {objects.map((object) => (
+        <ObjectNode
+          key={`${keyPrefix}:${object.id}`}
+          object={object}
+          asset={getAsset(object.assetId, map.tilesets)}
+          selected={selectedKeys.has(`${object.kind === 'light' ? 'light' : 'object'}:${object.id}`)}
+        />
+      ))}
     </>
   );
-}
+});
 
-function ObjectNode({ object, asset, selected }: { object: MapObject; asset: Asset | null; selected: boolean }) {
+const ObjectNode = memo(function ObjectNode({ object, asset, selected }: { object: MapObject; asset: Asset | null; selected: boolean }) {
   const image = useLoadedImage(asset?.imageUrl || asset?.thumbnailUrl);
   const width = object.width * (object.scale || 1);
   const height = object.height * (object.scale || 1);
@@ -356,29 +568,30 @@ function ObjectNode({ object, asset, selected }: { object: MapObject; asset: Ass
       {image ? (
         <KonvaImage image={image} width={width} height={height} cornerRadius={6} />
       ) : (
-        <Rect width={width} height={height} fill={asset?.color || '#2b213d'} stroke={selected ? '#c4b5fd' : asset?.stroke || '#7c6aa7'} strokeWidth={selected ? 2 : 1} cornerRadius={6} />
+        <ProceduralObject asset={asset} width={width} height={height} selected={selected} strokeWidth={selected ? 2 : 1} />
       )}
       {object.kind === 'light' ? <Circle x={width / 2} y={height / 2} radius={Math.max(width, height) * 0.55} fill={asset?.color || '#fef3c7'} opacity={0.16} /> : null}
     </Group>
   );
-}
+});
 
-function TokenLayer({ map, viewMode, selectedKeys }: { map: OmniMap; viewMode: 'gm' | 'player-preview'; selectedKeys: Set<string> }) {
+function TokenLayer({ map, viewMode, selectedKeys, viewportBounds, previewPositions }: { map: OmniMap; viewMode: 'gm' | 'player-preview'; selectedKeys: Set<string>; viewportBounds: VttRect; previewPositions: Record<string, { x: number; y: number }> }) {
   return (
     <>
       {map.tokens
         .filter((token) => viewMode === 'gm' || (token.visibleToPlayers && !token.hidden))
-        .map((token) => <TokenNode key={token.id} token={token} map={map} selected={selectedKeys.has(`token:${token.id}`)} />)}
+        .filter((token) => selectedKeys.has(`token:${token.id}`) || rectsIntersect(tokenBounds(map, token, previewPositions[token.id]), viewportBounds))
+        .map((token) => <TokenNode key={token.id} token={token} map={map} selected={selectedKeys.has(`token:${token.id}`)} previewPosition={previewPositions[token.id]} />)}
     </>
   );
 }
 
-function TokenNode({ token, map, selected }: { token: TabletopToken; map: OmniMap; selected: boolean }) {
+function TokenNode({ token, map, selected, previewPosition }: { token: TabletopToken; map: OmniMap; selected: boolean; previewPosition?: { x: number; y: number } }) {
   const image = useLoadedImage(token.image);
   const size = map.gridSize * Math.max(0.5, token.size || 1);
-  const x = token.x * map.gridSize;
-  const y = token.y * map.gridSize;
-  const color = token.kind === 'enemy' ? '#fb7185' : token.kind === 'npc' ? '#fbbf24' : '#60a5fa';
+  const x = (previewPosition?.x ?? token.x) * map.gridSize;
+  const y = (previewPosition?.y ?? token.y) * map.gridSize;
+  const color = token.color || (token.kind === 'enemy' ? '#fb7185' : token.kind === 'npc' ? '#fbbf24' : token.kind === 'creature' ? '#a78bfa' : '#60a5fa');
   return (
     <Group x={x} y={y} listening={false}>
       {image ? (
@@ -501,6 +714,168 @@ function combineRects(rects: VttRect[]) {
   const right = Math.max(...rects.map((rect) => rect.x + rect.width));
   const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
   return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function combineTwoRects(left: VttRect, right: VttRect): VttRect {
+  const x = Math.min(left.x, right.x);
+  const y = Math.min(left.y, right.y);
+  const maxX = Math.max(left.x + left.width, right.x + right.width);
+  const maxY = Math.max(left.y + left.height, right.y + right.height);
+  return { x, y, width: maxX - x, height: maxY - y };
+}
+
+function getViewportWorldBounds(camera: VttCamera, viewport: { width: number; height: number }, gridSize: number): VttRect {
+  const margin = Math.max(gridSize * 4, 128 / Math.max(0.1, camera.zoom));
+  const left = (0 - camera.x) / camera.zoom - margin;
+  const top = (0 - camera.y) / camera.zoom - margin;
+  const right = (viewport.width - camera.x) / camera.zoom + margin;
+  const bottom = (viewport.height - camera.y) / camera.zoom + margin;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function getMapInstanceWorldBounds(instance: SessionMapInstance): VttRect {
+  return {
+    x: instance.x,
+    y: instance.y,
+    width: Math.max(1, instance.width) * Math.max(1, instance.gridSize),
+    height: Math.max(1, instance.height) * Math.max(1, instance.gridSize)
+  };
+}
+
+function getObjectRect(object: MapObject): VttRect {
+  return {
+    x: object.x,
+    y: object.y,
+    width: object.width * (object.scale || 1),
+    height: object.height * (object.scale || 1)
+  };
+}
+
+function tokenBounds(map: OmniMap, token: TabletopToken, previewPosition?: { x: number; y: number }): VttRect {
+  const size = map.gridSize * Math.max(0.5, token.size || 1);
+  return {
+    x: (previewPosition?.x ?? token.x) * map.gridSize,
+    y: (previewPosition?.y ?? token.y) * map.gridSize,
+    width: size,
+    height: size
+  };
+}
+
+function translateRect(rect: VttRect, dx: number, dy: number): VttRect {
+  return { x: rect.x + dx, y: rect.y + dy, width: rect.width, height: rect.height };
+}
+
+function rectsIntersect(a: VttRect, b: VttRect) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function countVisibleTiles(map: OmniMap, viewportBounds: VttRect) {
+  return [
+    map.tileLayers.floor,
+    map.tileLayers.walls,
+    map.tileLayers.doors,
+    map.tileLayers.collision
+  ].reduce((total, layer) => {
+    if (!layer.visible) return total;
+    return total + layer.cells.filter((cell) => {
+      const asset = getAsset(cell.assetId, map.tilesets);
+      const width = (cell.footprint?.w || asset?.gridFootprint?.w || 1) * map.gridSize;
+      const height = (cell.footprint?.h || asset?.gridFootprint?.h || 1) * map.gridSize;
+      return rectsIntersect({ x: cell.x * map.gridSize, y: cell.y * map.gridSize, width, height }, viewportBounds);
+    }).length;
+  }, 0);
+}
+
+function countVisibleTileChunks(map: OmniMap, viewportBounds: VttRect) {
+  return [
+    map.tileLayers.floor,
+    map.tileLayers.walls,
+    map.tileLayers.doors,
+    map.tileLayers.collision
+  ].reduce((total, layer) => {
+    if (!layer.visible) return total;
+    return total + buildTileChunks(layer, map).filter((chunk) => rectsIntersect(chunk.bounds, viewportBounds)).length;
+  }, 0);
+}
+
+function countVisibleObjects(map: OmniMap, viewportBounds: VttRect) {
+  return getAllObjects(map).filter((object) => rectsIntersect(getObjectRect(object), viewportBounds)).length;
+}
+
+function countVisibleTokens(map: OmniMap, viewportBounds: VttRect) {
+  return map.tokens.filter((token) => rectsIntersect(tokenBounds(map, token), viewportBounds)).length;
+}
+
+function buildRenderStats(map: OmniMap, showBaseMap: boolean, visibleInstances: SessionMapInstance[], viewportBounds: VttRect) {
+  const baseTiles = showBaseMap ? countVisibleTiles(map, viewportBounds) : 0;
+  const baseChunks = showBaseMap ? countVisibleTileChunks(map, viewportBounds) : 0;
+  const baseObjects = countVisibleObjects(map, viewportBounds);
+  const instanceTiles = visibleInstances.reduce((total, instance) => {
+    if (!instance.data) return total;
+    return total + countVisibleTiles(instance.data, translateRect(viewportBounds, -instance.x, -instance.y));
+  }, 0);
+  const instanceChunks = visibleInstances.reduce((total, instance) => {
+    if (!instance.data) return total;
+    return total + countVisibleTileChunks(instance.data, translateRect(viewportBounds, -instance.x, -instance.y));
+  }, 0);
+  const instanceObjects = visibleInstances.reduce((total, instance) => {
+    if (!instance.data) return total;
+    return total + countVisibleObjects(instance.data, translateRect(viewportBounds, -instance.x, -instance.y));
+  }, 0);
+  return {
+    sessionMapInstances: map.sessionMapInstances?.length || 0,
+    visibleMapInstances: visibleInstances.length,
+    renderedTiles: baseTiles + instanceTiles,
+    renderedChunks: baseChunks + instanceChunks,
+    renderedObjects: baseObjects + instanceObjects,
+    renderedTokens: countVisibleTokens(map, viewportBounds),
+    konvaLayers: 3,
+    cacheEnabled: false,
+    cullingEnabled: true
+  };
+}
+
+function useApproxFps(enabled: boolean) {
+  const [fps, setFps] = useState(0);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let frame = 0;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      frame += 1;
+      if (now - last >= 750) {
+        setFps(Math.round((frame * 1000) / (now - last)));
+        frame = 0;
+        last = now;
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [enabled]);
+  return fps;
+}
+
+function VttPerfDebug({ stats, fps, viewportBounds }: { stats: ReturnType<typeof buildRenderStats>; fps: number; viewportBounds: VttRect }) {
+  return (
+    <div className="pointer-events-none fixed right-4 top-[54px] z-40 w-64 rounded-xl border border-sky-300/20 bg-[#100c18]/90 p-3 text-[11px] font-semibold text-vitaMuted shadow-soft backdrop-blur">
+      <div className="mb-1 text-xs font-black uppercase tracking-wide text-sky-100">Perf</div>
+      <div className="grid grid-cols-[118px_1fr] gap-x-2 gap-y-1">
+        <span>FPS</span><span className="text-white">{fps || '-'}</span>
+        <span>Mapas</span><span className="text-white">{stats.sessionMapInstances}</span>
+        <span>Visiveis</span><span className="text-white">{stats.visibleMapInstances}</span>
+        <span>Tiles</span><span className="text-white">{stats.renderedTiles}</span>
+        <span>Chunks</span><span className="text-white">{stats.renderedChunks}</span>
+        <span>Objetos</span><span className="text-white">{stats.renderedObjects}</span>
+        <span>Tokens</span><span className="text-white">{stats.renderedTokens}</span>
+        <span>Layers</span><span className="text-white">{stats.konvaLayers}</span>
+        <span>Cache</span><span className="text-white">{stats.cacheEnabled ? 'sim' : 'nao'}</span>
+        <span>Culling</span><span className="text-white">{stats.cullingEnabled ? 'sim' : 'nao'}</span>
+        <span>Viewport</span><span className="text-white">{Math.round(viewportBounds.x)}, {Math.round(viewportBounds.y)}</span>
+      </div>
+    </div>
+  );
 }
 
 function layerColor(layer: string) {
