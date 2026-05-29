@@ -35,7 +35,7 @@ export function VttTokenModal({
     setSubtitle(labelForKind(initialKind));
     setColor(initialKind === 'enemy' ? '#fb7185' : initialKind === 'creature' ? '#a78bfa' : '#fbbf24');
     setVisibleToPlayers(initialKind !== 'enemy');
-    setBlocksMovement(initialKind === 'enemy' || initialKind === 'creature');
+    setBlocksMovement(false);
     setOwnerUserId('');
     setOwnerCharacterId('');
     setSourceFormId('');

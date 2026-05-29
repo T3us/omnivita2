@@ -124,7 +124,8 @@ export function SessionStage() {
     if (tokenPayload) {
       try {
         const token = JSON.parse(tokenPayload) as AvailableTabletopToken;
-        state.addToken(token, Math.round(point.x / map.gridSize), Math.round(point.y / map.gridSize));
+        const size = map.gridSize * Math.max(0.5, token.size || 1);
+        state.addToken(token, point.x - size / 2, point.y - size / 2);
         state.setTool('select');
         return;
       } catch {
@@ -643,8 +644,8 @@ function TokenShape({
 
   return (
     <Group
-      x={token.x * size}
-      y={token.y * size}
+      x={token.x}
+      y={token.y}
       draggable={draggable}
       opacity={token.hidden ? 0.45 : 1}
       onMouseDown={(event) => {
@@ -665,21 +666,21 @@ function TokenShape({
       }}
       onDragEnd={(event) => {
         const start = dragStartRef.current || { x: token.x, y: token.y };
-        const nextX = Math.round(event.target.x() / size);
-        const nextY = Math.round(event.target.y() / size);
+        const nextX = event.target.x();
+        const nextY = event.target.y();
         const deltaX = nextX - start.x;
         const deltaY = nextY - start.y;
         const stateBefore = useTabletopStore.getState();
         const before = stateBefore.map.tokens.find((entry) => entry.id === token.id);
         const activeSelection = stateBefore.selectedTokenIds;
         if (activeSelection.includes(token.id) && getSessionSelectionCount(stateBefore) > 1) {
-          stateBefore.moveSelectedSessionItems(deltaX * size, deltaY * size);
+          stateBefore.moveSelectedSessionItems(deltaX, deltaY);
         } else {
           onMove(token.id, nextX, nextY);
         }
         const after = useTabletopStore.getState().map.tokens.find((entry) => entry.id === token.id);
         if (before && after && before.x === after.x && before.y === after.y) {
-          event.target.position({ x: start.x * size, y: start.y * size });
+          event.target.position({ x: start.x, y: start.y });
         }
         dragStartRef.current = null;
       }}
@@ -1107,8 +1108,13 @@ function computeVisibleCells(map: OmniMap, viewMode: 'gm' | 'player-preview') {
   const visible = new Set<string>();
   const tokens = map.tokens.filter((token) => token.visionEnabled !== false && !token.hidden && (viewMode === 'gm' || token.visibleToPlayers));
   tokens.forEach((token) => {
-    addVisionCircle(map, visible, { x: token.x, y: token.y }, Math.max(1, token.visionRadius || 6));
-    if (token.lightRadius) addVisionCircle(map, visible, { x: token.x, y: token.y }, Math.max(1, Math.round(token.lightRadius)));
+    const visualSize = map.gridSize * Math.max(0.5, token.size || 1);
+    const cell = {
+      x: Math.floor((token.x + visualSize / 2) / map.gridSize),
+      y: Math.floor((token.y + visualSize / 2) / map.gridSize)
+    };
+    addVisionCircle(map, visible, cell, Math.max(1, token.visionRadius || 6));
+    if (token.lightRadius) addVisionCircle(map, visible, cell, Math.max(1, Math.round(token.lightRadius)));
   });
   [map.lightingLayer, map.objectLayer, map.mechanicalLayer].flatMap((layer) => layer.objects).forEach((object) => {
     if (!object.light || (viewMode !== 'gm' && object.visibleToPlayers === false)) return;

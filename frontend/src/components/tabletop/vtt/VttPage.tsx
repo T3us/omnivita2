@@ -15,6 +15,9 @@ import { VttShell } from './VttShell';
 import type { SaveAreaMeta } from './VttSaveAreaModal';
 
 const CUSTOM_TOKENS_KEY = 'omnivita_vtt_custom_tokens_v1';
+const ACTIVE_SESSION_BOARD_QUERY_KEY = ['active-session-board'] as const;
+const SYNC_POLL_MS = 1200;
+const SESSION_AUTOSAVE_MS = 850;
 
 export function VttPage({ playerMode = false }: { playerMode?: boolean } = {}) {
   const queryClient = useQueryClient();
@@ -22,12 +25,27 @@ export function VttPage({ playerMode = false }: { playerMode?: boolean } = {}) {
   const { session } = useAuth();
   const bootstrap = useBootstrap();
   const map = useTabletopStore((state) => state.map);
+  const dirty = useTabletopStore((state) => state.dirty);
   const setMap = useTabletopStore((state) => state.setMap);
   const clearDirty = useTabletopStore((state) => state.clearDirty);
   const [activeSessionBoardId, setActiveSessionBoardId] = useState('');
+  const activeSessionBoardIdRef = useRef('');
   const [, setMessage] = useState('Tabletop dedicado pronto.');
   const [customTokens, setCustomTokens] = useState<AvailableTabletopToken[]>(() => readCustomTokens());
+  const [lastSavedAt, setLastSavedAt] = useState('');
+  const [lastFetchedAt, setLastFetchedAt] = useState('');
+  const [lastSyncEvent, setLastSyncEvent] = useState('');
+  const [syncSource, setSyncSource] = useState<'backend' | 'socket' | 'local' | 'none'>('none');
+  const [autosaving, setAutosaving] = useState(false);
   const applyingRemoteRef = useRef(false);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const autosavingRef = useRef(false);
+  const debugSync = useMemo(() => new URLSearchParams(location.search).get('debugSync') === '1', [location.search]);
+  const shouldUseActiveSession = playerMode || location.pathname === '/tabletop' || location.pathname.endsWith('/session');
+
+  useEffect(() => {
+    activeSessionBoardIdRef.current = activeSessionBoardId;
+  }, [activeSessionBoardId]);
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
@@ -61,10 +79,13 @@ export function VttPage({ playerMode = false }: { playerMode?: boolean } = {}) {
     enabled: !playerMode
   });
   const activeBoardQuery = useQuery({
-    queryKey: ['session-board-active'],
+    queryKey: ACTIVE_SESSION_BOARD_QUERY_KEY,
     queryFn: () => api.getActiveSessionBoard(),
-    enabled: playerMode,
-    refetchOnWindowFocus: true
+    enabled: shouldUseActiveSession,
+    refetchInterval: playerMode ? SYNC_POLL_MS : false,
+    refetchIntervalInBackground: playerMode,
+    refetchOnWindowFocus: true,
+    staleTime: 0
   });
   const savedMaps = useMemo(() => seedDefaultSavedMaps(mapsQuery.data?.maps || []), [mapsQuery.data?.maps]);
 
@@ -87,6 +108,12 @@ export function VttPage({ playerMode = false }: { playerMode?: boolean } = {}) {
     onSuccess: (result) => {
       if (result.kind === 'session') {
         setActiveSessionBoardId(result.board.id);
+        activeSessionBoardIdRef.current = result.board.id;
+        setLastSavedAt(new Date().toISOString());
+        setLastSyncEvent('manual-save');
+        setSyncSource('backend');
+        queryClient.setQueryData(ACTIVE_SESSION_BOARD_QUERY_KEY, { board: result.board });
+        queryClient.invalidateQueries({ queryKey: ACTIVE_SESSION_BOARD_QUERY_KEY });
         setMessage('Sessao salva.');
         queryClient.invalidateQueries({ queryKey: ['session-boards'] });
       } else {
@@ -101,32 +128,89 @@ export function VttPage({ playerMode = false }: { playerMode?: boolean } = {}) {
   });
 
   useEffect(() => {
-    if (!playerMode) return;
+    if (!shouldUseActiveSession) return;
     const board = activeBoardQuery.data?.board;
-    if (!board?.activeMap) return;
+    setLastFetchedAt(new Date().toISOString());
+    if (!board?.activeMap) {
+      setSyncSource('backend');
+      return;
+    }
+    setActiveSessionBoardId(board.id);
+    activeSessionBoardIdRef.current = board.id;
+    setSyncSource('backend');
+    setLastSyncEvent(playerMode ? 'poll-player' : 'poll-gm');
+
+    const store = useTabletopStore.getState();
+    if (!playerMode && store.dirty) return;
     applyingRemoteRef.current = true;
     setMap({ ...board.activeMap, mode: 'session' });
-    setActiveSessionBoardId(board.id);
     clearDirty();
     window.setTimeout(() => {
       applyingRemoteRef.current = false;
     }, 0);
-  }, [activeBoardQuery.data?.board?.id, activeBoardQuery.data?.board?.updatedAt, activeBoardQuery.data?.board, clearDirty, playerMode, setMap]);
+  }, [activeBoardQuery.data?.board?.id, activeBoardQuery.data?.board?.updatedAt, activeBoardQuery.data?.board, clearDirty, playerMode, setMap, shouldUseActiveSession]);
 
   useEffect(() => {
-    if (!playerMode && !location.pathname.endsWith('/session')) return undefined;
-    return subscribeTabletopSessionBoard((board) => {
+    if (!shouldUseActiveSession) return undefined;
+    return subscribeTabletopSessionBoard((board, meta) => {
+      setLastFetchedAt(new Date().toISOString());
+      setLastSyncEvent(String(meta?.reason || 'socket'));
+      setSyncSource('socket');
       if (!board?.activeMap) return;
+      queryClient.setQueryData(ACTIVE_SESSION_BOARD_QUERY_KEY, { board });
+      setActiveSessionBoardId(board.id);
+      activeSessionBoardIdRef.current = board.id;
       if (!playerMode && useTabletopStore.getState().dirty) return;
       applyingRemoteRef.current = true;
       setMap({ ...board.activeMap, mode: 'session' });
-      setActiveSessionBoardId(board.id);
       clearDirty();
       window.setTimeout(() => {
         applyingRemoteRef.current = false;
       }, 0);
     });
-  }, [clearDirty, location.pathname, playerMode, setMap]);
+  }, [clearDirty, playerMode, queryClient, setMap, shouldUseActiveSession]);
+
+  useEffect(() => {
+    if (playerMode) return undefined;
+    const unsubscribe = useTabletopStore.subscribe((state, previous) => {
+      if (applyingRemoteRef.current || autosavingRef.current) return;
+      if (state.tabletopRole !== 'gm' || state.map.mode !== 'session' || !state.dirty) return;
+      if (state.map === previous.map && state.dirty === previous.dirty) return;
+      if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = window.setTimeout(async () => {
+        const current = useTabletopStore.getState();
+        if (applyingRemoteRef.current || current.tabletopRole !== 'gm' || current.map.mode !== 'session' || !current.dirty) return;
+        autosavingRef.current = true;
+        setAutosaving(true);
+        const board = buildSessionBoardFromMap(current.map, activeSessionBoardIdRef.current);
+        try {
+          const wasExistingBoard = Boolean(activeSessionBoardIdRef.current);
+          const result = activeSessionBoardIdRef.current
+            ? await api.updateSessionBoard(activeSessionBoardIdRef.current, board)
+            : await api.createSessionBoard(board);
+          setActiveSessionBoardId(result.board.id);
+          activeSessionBoardIdRef.current = result.board.id;
+          setLastSavedAt(new Date().toISOString());
+          setLastSyncEvent(wasExistingBoard ? 'autosave-update' : 'autosave-create');
+          setSyncSource('backend');
+          queryClient.setQueryData(ACTIVE_SESSION_BOARD_QUERY_KEY, { board: result.board });
+          queryClient.invalidateQueries({ queryKey: ACTIVE_SESSION_BOARD_QUERY_KEY });
+          queryClient.invalidateQueries({ queryKey: ['session-boards'] });
+          clearDirty();
+        } catch (error) {
+          console.warn('[OmniVita tabletop] Falha no autosave da sessao.', error);
+          setLastSyncEvent('autosave-error');
+        } finally {
+          autosavingRef.current = false;
+          setAutosaving(false);
+        }
+      }, SESSION_AUTOSAVE_MS);
+    });
+    return () => {
+      unsubscribe();
+      if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    };
+  }, [clearDirty, playerMode, queryClient]);
 
   useEffect(() => {
     if (!playerMode) return undefined;
@@ -233,36 +317,126 @@ export function VttPage({ playerMode = false }: { playerMode?: boolean } = {}) {
 
   return (
     <>
-      <VttShell
-        maps={savedMaps}
-        tokens={availableTokens}
-        customTokens={customTokens}
-        loadingMaps={mapsQuery.isLoading}
-        saving={saveMutation.isPending}
-        onSave={() => saveMutation.mutate()}
-        onSaveMapArea={handleSaveMapArea}
-        onLoadMap={handleLoadMap}
-        onAddMap={handleAddMap}
-        onPrepareMap={handlePrepareMap}
-        onRenameMap={handleRenameMap}
-        onDuplicateMap={handleDuplicateMap}
-        onDeleteMap={handleDeleteMap}
-        onCreateToken={(token) => {
-          setCustomTokens((current) => {
-            const next = [token, ...current.filter((entry) => entry.id !== token.id)];
-            writeCustomTokens(next);
-            return next;
-          });
-          setMessage(`${token.name} salvo na biblioteca.`);
-        }}
-        playerMode={playerMode}
-      />
-      {playerMode && !activeBoardQuery.isLoading && activeBoardQuery.data?.board === null ? (
-        <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-xl border border-white/10 bg-[#12101a]/92 px-4 py-3 text-sm font-bold text-white shadow-soft">
-          Aguardando o mestre iniciar uma sessao.
-        </div>
+      {playerMode && !activeBoardQuery.data?.board?.activeMap ? (
+        <PlayerSessionWaiting loading={activeBoardQuery.isLoading} onRefresh={() => activeBoardQuery.refetch()} />
+      ) : (
+        <VttShell
+          maps={savedMaps}
+          tokens={availableTokens}
+          customTokens={customTokens}
+          loadingMaps={mapsQuery.isLoading}
+          saving={saveMutation.isPending || autosaving}
+          onSave={() => saveMutation.mutate()}
+          onSaveMapArea={handleSaveMapArea}
+          onLoadMap={handleLoadMap}
+          onAddMap={handleAddMap}
+          onPrepareMap={handlePrepareMap}
+          onRenameMap={handleRenameMap}
+          onDuplicateMap={handleDuplicateMap}
+          onDeleteMap={handleDeleteMap}
+          onCreateToken={(token) => {
+            setCustomTokens((current) => {
+              const next = [token, ...current.filter((entry) => entry.id !== token.id)];
+              writeCustomTokens(next);
+              return next;
+            });
+            setMessage(`${token.name} salvo na biblioteca.`);
+          }}
+          playerMode={playerMode}
+        />
+      )}
+      {debugSync ? (
+        <VttSyncDebug
+          playerMode={playerMode}
+          activeSessionBoardId={activeSessionBoardId}
+          board={activeBoardQuery.data?.board || null}
+          dirty={dirty}
+          lastSavedAt={lastSavedAt}
+          lastFetchedAt={lastFetchedAt}
+          syncSource={syncSource}
+          pollingEnabled={playerMode}
+          lastSyncEvent={lastSyncEvent}
+          fetching={activeBoardQuery.isFetching}
+          autosaving={autosaving}
+        />
       ) : null}
     </>
+  );
+}
+
+function PlayerSessionWaiting({ loading, onRefresh }: { loading: boolean; onRefresh(): void }) {
+  return (
+    <main className="fixed inset-0 grid place-items-center bg-[#07040d] px-4 text-textMain">
+      <div className="w-[min(420px,calc(100vw-32px))] rounded-xl border border-white/10 bg-[#12101a]/92 p-5 text-center shadow-soft">
+        <p className="text-xs font-black uppercase tracking-[0.2em] text-vitaMuted">Tabletop Player</p>
+        <h1 className="mt-3 text-xl font-black text-white">
+          {loading ? 'Carregando sessao...' : 'Aguardando o mestre iniciar uma sessao.'}
+        </h1>
+        <p className="mt-2 text-sm font-semibold text-vitaMuted">
+          Quando o mestre salvar ou atualizar a cena ativa, ela aparece aqui automaticamente.
+        </p>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="mt-4 rounded-lg border border-vita/40 bg-vita/15 px-3 py-2 text-sm font-bold text-white hover:bg-vita/25"
+        >
+          Atualizar
+        </button>
+      </div>
+    </main>
+  );
+}
+
+function VttSyncDebug({
+  playerMode,
+  activeSessionBoardId,
+  board,
+  dirty,
+  lastSavedAt,
+  lastFetchedAt,
+  syncSource,
+  pollingEnabled,
+  lastSyncEvent,
+  fetching,
+  autosaving
+}: {
+  playerMode: boolean;
+  activeSessionBoardId: string;
+  board: SessionBoard | null;
+  dirty: boolean;
+  lastSavedAt: string;
+  lastFetchedAt: string;
+  syncSource: string;
+  pollingEnabled: boolean;
+  lastSyncEvent: string;
+  fetching: boolean;
+  autosaving: boolean;
+}) {
+  const currentMap = useTabletopStore((state) => state.map);
+  const tokenCount = currentMap.tokens.length;
+  const mapInstanceCount = currentMap.sessionMapInstances?.length || 0;
+  return (
+    <div className="pointer-events-none fixed right-4 top-[54px] z-[70] w-80 rounded-xl border border-cyan-300/25 bg-[#100c18]/92 p-3 text-[11px] font-semibold text-vitaMuted shadow-soft backdrop-blur">
+      <div className="mb-1 text-xs font-black uppercase tracking-wide text-cyan-100">Sync Debug</div>
+      <div className="grid grid-cols-[128px_1fr] gap-x-2 gap-y-1">
+        <span>Route</span><span className="text-white">{playerMode ? 'player' : currentMap.mode === 'session' ? 'gm/session' : 'gm/build'}</span>
+        <span>Board id</span><span className="truncate text-white">{activeSessionBoardId || board?.id || '-'}</span>
+        <span>Board title</span><span className="truncate text-white">{board?.name || '-'}</span>
+        <span>Board updated</span><span className="truncate text-white">{board?.updatedAt || '-'}</span>
+        <span>Dirty</span><span className={dirty ? 'text-amber-200' : 'text-emerald-200'}>{String(dirty)}</span>
+        <span>Autosave</span><span className={autosaving ? 'text-amber-200' : 'text-white'}>{String(autosaving)}</span>
+        <span>Last saved</span><span className="truncate text-white">{lastSavedAt || '-'}</span>
+        <span>Last fetched</span><span className="truncate text-white">{lastFetchedAt || '-'}</span>
+        <span>Source</span><span className="text-white">{syncSource}</span>
+        <span>Maps</span><span className="text-white">{mapInstanceCount}</span>
+        <span>Tokens</span><span className="text-white">{tokenCount}</span>
+        <span>Polling</span><span className="text-white">{String(pollingEnabled)}</span>
+        <span>Socket</span><span className="text-white">best-effort</span>
+        <span>Room</span><span className="truncate text-white">{activeSessionBoardId ? `session:${activeSessionBoardId}` : 'active-session'}</span>
+        <span>Fetching</span><span className="text-white">{String(fetching)}</span>
+        <span>Last event</span><span className="truncate text-white">{lastSyncEvent || '-'}</span>
+      </div>
+    </div>
   );
 }
 
@@ -303,7 +477,7 @@ function buildAvailableTokens(characters: CharacterSheet[], combatants: Combatan
     hpMax: 0,
     subtitle: `${character.identity.className || 'Player'} Nv ${character.identity.level || 1}`,
     visibleToPlayers: true,
-    blocksMovement: true
+    blocksMovement: false
   };
   });
 
@@ -318,7 +492,7 @@ function buildAvailableTokens(characters: CharacterSheet[], combatants: Combatan
     hpMax: Number(combatant.pvMax || 0),
     subtitle: combatant.subtitle || combatant.combatantType,
     visibleToPlayers: combatant.combatantType !== 'enemy',
-    blocksMovement: combatant.combatantType === 'enemy'
+    blocksMovement: false
   }));
 
   const byId = new Map<string, AvailableTabletopToken>();

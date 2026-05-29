@@ -168,7 +168,7 @@ export function normalizeMap(input: Partial<OmniMap> | null | undefined): OmniMa
     mechanicalLayer: normalizeObjectLayer(input?.mechanicalLayer, base.mechanicalLayer),
     notesLayer: normalizeObjectLayer(input?.notesLayer, base.notesLayer),
     fogLayer: normalizeFogLayer(input?.fogLayer, base.fogLayer),
-    tokens: Array.isArray(input?.tokens) ? input.tokens.map(normalizeToken).filter(Boolean) as TabletopToken[] : [],
+    tokens: Array.isArray(input?.tokens) ? input.tokens.map((token) => normalizeToken(token, clampInteger(input?.gridSize, 24, 96))).filter(Boolean) as TabletopToken[] : [],
     prefabs: Array.isArray(input?.prefabs) ? input.prefabs.map(normalizePrefab).filter(Boolean) as MapPrefab[] : [],
     metersPerCell: clampNumber(input?.metersPerCell, 0.5, 10, 1.5),
     lightingRegions: Array.isArray(input?.lightingRegions) ? input.lightingRegions.map(normalizeLightingRegion).filter(Boolean) as LightingRegion[] : [],
@@ -427,8 +427,11 @@ function normalizePrefab(prefab: Partial<MapPrefab>) {
   };
 }
 
-function normalizeToken(token: Partial<TabletopToken>) {
+function normalizeToken(token: Partial<TabletopToken>, gridSize: number) {
   if (!token?.id) return null;
+  const rawX = Number(token.x || 0);
+  const rawY = Number(token.y || 0);
+  const isWorldPosition = token.positionMode === 'world';
   return {
     id: String(token.id),
     sourceId: String(token.sourceId || token.id),
@@ -450,8 +453,9 @@ function normalizeToken(token: Partial<TabletopToken>) {
     nameOverride: token.nameOverride ? String(token.nameOverride) : undefined,
     image: token.image ? String(token.image) : undefined,
     color: token.color ? String(token.color) : undefined,
-    x: Number(token.x || 0),
-    y: Number(token.y || 0),
+    x: isWorldPosition ? rawX : rawX * gridSize,
+    y: isWorldPosition ? rawY : rawY * gridSize,
+    positionMode: 'world' as const,
     controlledBy: token.controlledBy ? String(token.controlledBy) : undefined,
     hpCurrent: token.hpCurrent === undefined ? undefined : Number(token.hpCurrent || 0),
     hpMax: token.hpMax === undefined ? undefined : Number(token.hpMax || 0),

@@ -23,8 +23,8 @@ import type { MapTool } from '../types';
 type RailAction = MapTool | 'assets' | 'settings';
 
 const sessionTools: Array<{ id: RailAction; icon: LucideIcon; label: string; hint: string; group: 'main' | 'scene' | 'utility' | 'meta' }> = [
-  { id: 'select', icon: MousePointer2, label: 'Selecionar', hint: 'V', group: 'main' },
-  { id: 'move-token', icon: Hand, label: 'Mover tokens', hint: 'H', group: 'main' },
+  { id: 'select', icon: MousePointer2, label: 'Selecionar / mover token', hint: 'V', group: 'main' },
+  { id: 'move-token', icon: Hand, label: 'Mover tokens - arraste qualquer token visivel', hint: 'H', group: 'main' },
   { id: 'token', icon: UserRoundPlus, label: 'Spawn token', hint: 'T', group: 'main' },
   { id: 'fog', icon: CloudFog, label: 'Fog', hint: 'F', group: 'scene' },
   { id: 'template', icon: Shapes, label: 'Template', hint: 'A', group: 'scene' },
@@ -38,8 +38,8 @@ const sessionTools: Array<{ id: RailAction; icon: LucideIcon; label: string; hin
 ];
 
 const buildTools: Array<{ id: RailAction; icon: LucideIcon; label: string; hint: string; group: 'main' | 'scene' | 'utility' | 'meta' }> = [
-  { id: 'select', icon: MousePointer2, label: 'Selecionar', hint: 'V', group: 'main' },
-  { id: 'move-token', icon: Hand, label: 'Mover tokens', hint: 'H', group: 'main' },
+  { id: 'select', icon: MousePointer2, label: 'Selecionar / mover token', hint: 'V', group: 'main' },
+  { id: 'move-token', icon: Hand, label: 'Mover tokens - arraste qualquer token visivel', hint: 'H', group: 'main' },
   { id: 'brush', icon: Grid2X2, label: 'Pintar piso', hint: 'B', group: 'scene' },
   { id: 'wall', icon: Package, label: 'Parede', hint: 'Tool', group: 'scene' },
   { id: 'collision', icon: Box, label: 'Colisao', hint: 'Tool', group: 'scene' },
@@ -56,7 +56,7 @@ const buildTools: Array<{ id: RailAction; icon: LucideIcon; label: string; hint:
 ];
 
 const playerTools: Array<{ id: RailAction; icon: LucideIcon; label: string; hint: string; group: 'main' | 'scene' | 'utility' | 'meta' }> = [
-  { id: 'move-token', icon: Hand, label: 'Mover tokens', hint: 'H', group: 'main' },
+  { id: 'move-token', icon: Hand, label: 'Mover tokens - arraste qualquer token visivel', hint: 'H', group: 'main' },
   { id: 'measure', icon: Ruler, label: 'Regua', hint: 'M', group: 'utility' },
   { id: 'ping', icon: Radar, label: 'Ping', hint: 'P', group: 'utility' },
   { id: 'token', icon: UserRoundPlus, label: 'Meus tokens', hint: 'T', group: 'meta' },

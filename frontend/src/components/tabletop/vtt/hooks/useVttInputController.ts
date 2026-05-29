@@ -541,7 +541,8 @@ export function useVttInputController({
 
   function placeHeldToken(world: VttPoint) {
     if (!heldToken) return;
-    useTabletopStore.getState().addToken(heldToken, Math.round(world.x / map.gridSize), Math.round(world.y / map.gridSize));
+    const size = map.gridSize * Math.max(0.5, heldToken.size || 1);
+    useTabletopStore.getState().addToken(heldToken, world.x - size / 2, world.y - size / 2);
     clearHeld();
   }
 
@@ -712,6 +713,8 @@ export function useVttInputController({
       cell: worldToCell(cursorWorld, map.gridSize),
       paintStrokeCellCount,
       dragCommitCount: drag.preview.commitCount,
+      draggedTokenId: drag.preview.draggedTokenId,
+      lastMoveCommitted: drag.lastMoveCommitted,
       measureActive: Boolean(rulerDraft),
       boxSelectActive: Boolean(selectionBox)
     },

@@ -2122,7 +2122,6 @@ function CombatPanel({
   const combatLogEntries = logEntries.filter((entry) => String(entry.category || '') === 'combate').slice(0, 10);
   const [activeEnemy, setActiveEnemy] = useState<EnemyRecord | null>(null);
   const [message, setMessage] = useState('');
-  const [pvAdjustDrafts, setPvAdjustDrafts] = useState<Record<string, string>>({});
   const [plannerState, setPlannerState] = useState(() => loadEncounterPlannerState());
   const generatorType = plannerState.type;
   const generatorPressure = plannerState.pressure;
@@ -2273,14 +2272,13 @@ function CombatPanel({
     });
   }
 
-  function applyCustomPvAdjustment(combatant: CombatantDraft, direction: -1 | 1) {
-    const amount = Math.abs(clampNumber(Number(pvAdjustDrafts[combatant.instanceId] || 0), 0, 9999));
+  function applyCustomPvAdjustment(combatant: CombatantDraft, direction: -1 | 1, amount: number) {
     if (!amount) {
       setMessage('Informe um valor para dano ou cura');
-      return;
+      return false;
     }
     applyPvDelta(combatant, amount * direction);
-    setPvAdjustDrafts((current) => ({ ...current, [combatant.instanceId]: '' }));
+    return true;
   }
 
   function passTurn() {
@@ -2681,44 +2679,35 @@ function CombatPanel({
                         <Button key={delta} type="button" disabled={saving} onClick={() => applyPvDelta(combatant, delta)}>{delta > 0 ? `+${delta}` : delta}</Button>
                       ))}
                     </div>
-                    <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr))]">
-                      <input
-                        className={fieldClass}
-                        min={0}
-                        placeholder="Valor"
-                        type="number"
-                        value={pvAdjustDrafts[combatant.instanceId] || ''}
-                        onChange={(event) => setPvAdjustDrafts((current) => ({ ...current, [combatant.instanceId]: event.target.value }))}
-                      />
-                      <Button type="button" disabled={saving} onClick={() => applyCustomPvAdjustment(combatant, -1)}>Aplicar dano</Button>
-                      <Button type="button" disabled={saving} onClick={() => applyCustomPvAdjustment(combatant, 1)}>Aplicar cura</Button>
-                    </div>
+                    <CombatPvAdjustmentControls
+                      saving={saving}
+                      onApply={(direction, amount) => applyCustomPvAdjustment(combatant, direction, amount)}
+                    />
                   </div>
                   <div className="grid gap-3">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="grid gap-2">
                         <span className="text-sm font-semibold text-textMuted">PV</span>
-                        <input
+                        <CombatNumberInput
                           className={fieldClass}
+                          value={Number(combatant.pvCurrent || 0)}
                           min={0}
                           max={combatant.pvMax}
-                          type="number"
-                          value={Number(combatant.pvCurrent || 0)}
-                          onChange={(event) => updateCombatant(combatant.instanceId, (entry) => {
-                            const nextPv = clampNumber(Number(event.target.value || 0), 0, Number(entry.pvMax || 0));
+                          onCommit={(value) => updateCombatant(combatant.instanceId, (entry) => {
+                            const nextPv = clampNumber(value, 0, Number(entry.pvMax || 0));
                             return { ...entry, pvCurrent: nextPv, status: normalizeStatusForPv(entry.status, nextPv) };
                           })}
                         />
                       </label>
                       <label className="grid gap-2">
                         <span className="text-sm font-semibold text-textMuted">Inic</span>
-                        <input
+                        <CombatNumberInput
                           className={fieldClass}
+                          value={Number(combatant.initiativeTotal || 0)}
                           min={-99}
                           max={999}
-                          type="number"
-                          value={Number(combatant.initiativeTotal || 0)}
-                          onChange={(event) => updateCombatant(combatant.instanceId, (entry) => ({ ...entry, initiativeTotal: clampNumber(Number(event.target.value || 0), -99, 999) }))}
+                          allowNegative
+                          onCommit={(value) => updateCombatant(combatant.instanceId, (entry) => ({ ...entry, initiativeTotal: clampNumber(value, -99, 999) }))}
                         />
                       </label>
                     </div>
@@ -6679,6 +6668,118 @@ function NumberField({ label, value, onChange, max }: { label: string; value: nu
       <input className={fieldClass} type="number" min={0} max={max} value={Number(value || 0)} onChange={(event) => onChange(Number(event.target.value))} />
     </label>
   );
+}
+
+function CombatNumberInput({
+  value,
+  onCommit,
+  min = 0,
+  max = 9999,
+  allowNegative = false,
+  className = fieldClass
+}: {
+  value: number | null | undefined;
+  onCommit(value: number): void;
+  min?: number;
+  max?: number;
+  allowNegative?: boolean;
+  className?: string;
+}) {
+  const [draft, setDraft] = useState(formatNumberDraft(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(formatNumberDraft(value));
+  }, [focused, value]);
+
+  function commitDraft() {
+    const next = parseDraftInteger(draft, min, max);
+    if (next === null) {
+      setDraft(formatNumberDraft(value));
+      setFocused(false);
+      return;
+    }
+    setDraft(String(next));
+    setFocused(false);
+    if (next !== Number(value || 0)) onCommit(next);
+  }
+
+  return (
+    <input
+      className={className}
+      inputMode="numeric"
+      max={max}
+      min={min}
+      pattern={allowNegative ? '-?[0-9]*' : '[0-9]*'}
+      type="text"
+      value={draft}
+      onBlur={commitDraft}
+      onChange={(event) => {
+        const next = event.target.value;
+        if (isPermittedNumberDraft(next, allowNegative)) setDraft(next);
+      }}
+      onFocus={() => setFocused(true)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+        if (event.key === 'Escape') {
+          setDraft(formatNumberDraft(value));
+          setFocused(false);
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+function CombatPvAdjustmentControls({ saving, onApply }: { saving: boolean; onApply(direction: -1 | 1, amount: number): boolean }) {
+  const [draft, setDraft] = useState('');
+
+  function apply(direction: -1 | 1) {
+    const amount = Math.abs(parseDraftInteger(draft, 0, 9999) ?? 0);
+    if (onApply(direction, amount)) setDraft('');
+  }
+
+  return (
+    <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr))]">
+      <input
+        className={fieldClass}
+        inputMode="numeric"
+        min={0}
+        pattern="[0-9]*"
+        placeholder="Valor"
+        type="text"
+        value={draft}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (isPermittedNumberDraft(next, false)) setDraft(next);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') apply(-1);
+          if (event.key === 'Escape') setDraft('');
+        }}
+      />
+      <Button type="button" disabled={saving} onClick={() => apply(-1)}>Aplicar dano</Button>
+      <Button type="button" disabled={saving} onClick={() => apply(1)}>Aplicar cura</Button>
+    </div>
+  );
+}
+
+function formatNumberDraft(value: number | null | undefined) {
+  if (value === null || value === undefined) return '';
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(numeric) : '';
+}
+
+function parseDraftInteger(value: string, min: number, max: number) {
+  const normalized = value.trim().replace(',', '.');
+  if (!normalized || normalized === '-' || normalized === '+') return null;
+  const numeric = Number(normalized);
+  if (!Number.isFinite(numeric)) return null;
+  return clampNumber(numeric, min, max);
+}
+
+function isPermittedNumberDraft(value: string, allowNegative: boolean) {
+  return allowNegative ? /^-?\d*$/.test(value) : /^\d*$/.test(value);
 }
 
 function Avatar({ image, name }: { image: string; name: string }) {

@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type { Asset, AvailableTabletopToken, MapObject, OmniMap, SessionMapInstance, SessionSelectedEntity, TabletopToken, TileLayer } from '../types';
 import { getAsset } from '../assets';
-import { useTabletopStore, type TokenMoveCheck } from '../mapStore';
+import { canControlTokenForUser, useTabletopStore, type TokenMoveCheck } from '../mapStore';
 import { useVttCamera, type VttCamera, type VttPoint } from './hooks/useVttCamera';
 import { useVttHitTesting, type VttRect } from './hooks/useVttHitTesting';
 import { useVttInputController } from './hooks/useVttInputController';
@@ -17,6 +17,22 @@ type TileChunkData = {
   key: string;
   bounds: VttRect;
   cells: TileLayer['cells'];
+};
+
+type VttInputDebugState = ReturnType<typeof useVttInputController>['debug'];
+
+type TokenDragDebugState = {
+  selectedTokenId?: string;
+  draggingTokenId?: string;
+  nodeX?: number;
+  nodeY?: number;
+  canDragToken?: boolean;
+  canControlToken?: boolean;
+  lastDragStart?: string;
+  lastDragEnd?: string;
+  lastMoveTokenCalled?: boolean;
+  lastMoveTokenPayload?: { tokenId: string; x: number; y: number };
+  collisionResult?: TokenMoveCheck | null;
 };
 
 export interface VttCanvasControls {
@@ -42,6 +58,7 @@ export function VttCanvas({ heldAssetId, heldToken, heldMapData, clearHeld, onPl
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [inputDebugOpen, setInputDebugOpen] = useState(false);
+  const [tokenDragDebug, setTokenDragDebug] = useState<TokenDragDebugState>({});
   const map = useTabletopStore((state) => state.map);
   const tool = useTabletopStore((state) => state.tool);
   const viewMode = useTabletopStore((state) => state.sessionViewMode);
@@ -168,7 +185,7 @@ export function VttCanvas({ heldAssetId, heldToken, heldMapData, clearHeld, onPl
 
         <Layer>
           <Group x={camera.camera.x} y={camera.camera.y} scaleX={camera.camera.zoom} scaleY={camera.camera.zoom}>
-            {showBaseMap ? <MapBody map={map} origin={{ x: 0, y: 0 }} selected={selectedKeys.has('map:base-map')} viewportBounds={viewportWorldBounds} keyPrefix="base" quality={tileQuality} /> : null}
+            {showBaseMap ? <MapBody map={map} origin={{ x: 0, y: 0 }} selected={selectedKeys.has('map:base-map')} viewportBounds={viewportWorldBounds} keyPrefix="base" quality={tileQuality} showLightAuras={viewMode === 'gm'} /> : null}
             {map.mode === 'build' && map.bounds ? <MapFrameOverlay map={map} zoom={camera.camera.zoom} /> : null}
             {visibleMapInstances.map((instance) => (
               <MapInstanceNode
@@ -178,11 +195,11 @@ export function VttCanvas({ heldAssetId, heldToken, heldMapData, clearHeld, onPl
                 viewportBounds={viewportWorldBounds}
                 previewPosition={input.dragPreview.mapPositions[instance.id]}
                 quality={tileQuality}
+                viewMode={viewMode}
               />
             ))}
-            <ObjectLayer map={map} selectedKeys={selectedKeys} viewportBounds={viewportWorldBounds} keyPrefix="base-object" />
-            <TemplateLayer map={map} selectedKeys={selectedKeys} />
-            <TokenLayer map={map} viewMode={viewMode} selectedKeys={selectedKeys} viewportBounds={viewportWorldBounds} previewPositions={input.dragPreview.tokenPositions} />
+            <ObjectLayer map={map} selectedKeys={selectedKeys} viewportBounds={viewportWorldBounds} keyPrefix="base-object" showLightAuras={viewMode === 'gm'} />
+            {viewMode === 'gm' ? <TemplateLayer map={map} selectedKeys={selectedKeys} /> : null}
             {selectionRects.map(({ entity, rect }) => (
               <Rect
                 key={`selection-${entity.type}-${entity.id}`}
@@ -215,6 +232,19 @@ export function VttCanvas({ heldAssetId, heldToken, heldMapData, clearHeld, onPl
           </Group>
         </Layer>
 
+        <Layer>
+          <Group x={camera.camera.x} y={camera.camera.y} scaleX={camera.camera.zoom} scaleY={camera.camera.zoom}>
+            <TokenLayer
+              map={map}
+              viewMode={viewMode}
+              tool={tool}
+              selectedKeys={selectedKeys}
+              viewportBounds={viewportWorldBounds}
+              onDebugChange={debugToken ? setTokenDragDebug : undefined}
+            />
+          </Group>
+        </Layer>
+
         <Layer listening={false}>
           {viewMode === 'player-preview' && sessionFogEnabled ? (
             <>
@@ -240,7 +270,17 @@ export function VttCanvas({ heldAssetId, heldToken, heldMapData, clearHeld, onPl
         </Layer>
       </Stage>
       {debugPerf && renderStats ? <VttPerfDebug stats={renderStats} fps={fps} viewportBounds={viewportWorldBounds} /> : null}
-      {(debugCollision || debugToken) && lastTokenMoveCheck ? <VttCollisionDebug check={lastTokenMoveCheck} /> : null}
+      {debugCollision && lastTokenMoveCheck ? <VttCollisionDebug check={lastTokenMoveCheck} /> : null}
+      {debugToken ? (
+        <VttTokenDebug
+          map={map}
+          debug={input.debug}
+          selectedEntities={selectedEntities}
+          lastTokenMoveCheck={lastTokenMoveCheck}
+          tokenDragDebug={tokenDragDebug}
+          offsetTop={debugCollision && lastTokenMoveCheck ? 254 : 54}
+        />
+      ) : null}
       <div className="pointer-events-auto fixed left-[76px] top-[54px] z-40">
         <button
           type="button"
@@ -261,6 +301,8 @@ export function VttCanvas({ heldAssetId, heldToken, heldMapData, clearHeld, onPl
               <span>Cell</span><span className="text-white">{input.debug.cell.x}, {input.debug.cell.y}</span>
               <span>Stroke</span><span className="text-white">{input.debug.paintStrokeCellCount}</span>
               <span>Drag</span><span className="text-white">{input.debug.dragCommitCount}</span>
+              <span>Token</span><span className="truncate text-white">{input.debug.draggedTokenId || '-'}</span>
+              <span>Commit</span><span className="text-white">{String(input.debug.lastMoveCommitted)}</span>
               <span>Measure</span><span className="text-white">{String(input.debug.measureActive)}</span>
               <span>Box</span><span className="text-white">{String(input.debug.boxSelectActive)}</span>
               <span>Camera</span><span className="text-white">{Math.round(camera.camera.x)}, {Math.round(camera.camera.y)} / {camera.camera.zoom.toFixed(2)}</span>
@@ -293,7 +335,71 @@ function VttCollisionDebug({ check }: { check: TokenMoveCheck }) {
   );
 }
 
-const MapInstanceNode = memo(function MapInstanceNode({ instance, selected, viewportBounds, previewPosition, quality }: { instance: SessionMapInstance; selected: boolean; viewportBounds: VttRect; previewPosition?: VttPoint; quality: ProceduralRenderQuality }) {
+function VttTokenDebug({
+  map,
+  debug,
+  selectedEntities,
+  lastTokenMoveCheck,
+  tokenDragDebug,
+  offsetTop
+}: {
+  map: OmniMap;
+  debug: VttInputDebugState;
+  selectedEntities: SessionSelectedEntity[];
+  lastTokenMoveCheck: TokenMoveCheck | null;
+  tokenDragDebug: TokenDragDebugState;
+  offsetTop: number;
+}) {
+  const tabletopRole = useTabletopStore((state) => state.tabletopRole);
+  const currentUserId = useTabletopStore((state) => state.currentUserId);
+  const currentCharacterId = useTabletopStore((state) => state.currentCharacterId);
+  const ownedCharacterIds = useTabletopStore((state) => state.ownedCharacterIds);
+  const selectedTokenIds = selectedEntities.filter((entity) => entity.type === 'token').map((entity) => entity.id);
+  const tokenId = tokenDragDebug.draggingTokenId || debug.draggedTokenId || tokenDragDebug.selectedTokenId || selectedTokenIds[selectedTokenIds.length - 1] || lastTokenMoveCheck?.tokenId || '';
+  const token = tokenId ? map.tokens.find((entry) => entry.id === tokenId) : null;
+  const moveCheck = tokenDragDebug.collisionResult || lastTokenMoveCheck;
+  const canControl = token
+    ? canControlTokenForUser(token, {
+      role: tabletopRole,
+      id: currentUserId,
+      characterId: currentCharacterId,
+      characterIds: ownedCharacterIds
+    })
+    : undefined;
+  return (
+    <div
+      className="pointer-events-none fixed right-4 z-50 w-80 rounded-xl border border-sky-300/25 bg-[#100c18]/92 p-3 text-[11px] font-semibold text-vitaMuted shadow-soft backdrop-blur"
+      style={{ top: offsetTop }}
+    >
+      <div className="mb-1 text-xs font-black uppercase tracking-wide text-sky-100">Token Debug</div>
+      <div className="grid grid-cols-[118px_1fr] gap-x-2 gap-y-1">
+        <span>Tool</span><span className="text-white">{debug.tool}</span>
+        <span>Intent</span><span className="text-white">{debug.pointerIntent}</span>
+        <span>Target</span><span className="truncate text-white">{debug.targetEntity}</span>
+        <span>Selecionados</span><span className="truncate text-white">{selectedTokenIds.join(', ') || '-'}</span>
+        <span>Arrastando</span><span className="truncate text-white">{tokenDragDebug.draggingTokenId || debug.draggedTokenId || '-'}</span>
+        <span>Token</span><span className="truncate text-white">{token?.name || tokenId || '-'}</span>
+        <span>Role</span><span className="text-white">{tabletopRole}</span>
+        <span>Can drag</span><span className={tokenDragDebug.canDragToken ? 'text-emerald-200' : 'text-red-200'}>{tokenDragDebug.canDragToken === undefined ? '-' : String(tokenDragDebug.canDragToken)}</span>
+        <span>Controla</span><span className={canControl ? 'text-emerald-200' : 'text-red-200'}>{String(tokenDragDebug.canControlToken ?? canControl ?? '-')}</span>
+        <span>Travado</span><span className="text-white">{token ? String(Boolean(token.locked)) : '-'}</span>
+        <span>Hidden</span><span className="text-white">{token ? String(Boolean(token.hidden)) : '-'}</span>
+        <span>Posicao</span><span className="text-white">{token ? `${token.x}, ${token.y}` : '-'}</span>
+        <span>Konva node</span><span className="text-white">{tokenDragDebug.nodeX === undefined ? '-' : `${Math.round(tokenDragDebug.nodeX)}, ${Math.round(tokenDragDebug.nodeY || 0)}`}</span>
+        <span>Mouse cell</span><span className="text-white">{debug.cell.x}, {debug.cell.y}</span>
+        <span>Move ok</span><span className={moveCheck?.ok ? 'text-emerald-200' : 'text-white'}>{moveCheck ? String(moveCheck.ok) : '-'}</span>
+        <span>Motivo</span><span className="truncate text-white">{moveCheck?.reason || '-'}</span>
+        <span>Destino</span><span className="text-white">{moveCheck?.targetCell ? `${Math.round(moveCheck.targetCell.x)}, ${Math.round(moveCheck.targetCell.y)}` : '-'}</span>
+        <span>Drag start</span><span className="truncate text-white">{tokenDragDebug.lastDragStart || '-'}</span>
+        <span>Drag end</span><span className="truncate text-white">{tokenDragDebug.lastDragEnd || '-'}</span>
+        <span>moveToken</span><span className={tokenDragDebug.lastMoveTokenCalled ? 'text-emerald-200' : 'text-white'}>{String(tokenDragDebug.lastMoveTokenCalled || debug.lastMoveCommitted || Boolean(moveCheck?.ok))}</span>
+        <span>Payload</span><span className="truncate text-white">{tokenDragDebug.lastMoveTokenPayload ? `${tokenDragDebug.lastMoveTokenPayload.tokenId}: ${Math.round(tokenDragDebug.lastMoveTokenPayload.x)}, ${Math.round(tokenDragDebug.lastMoveTokenPayload.y)}` : '-'}</span>
+      </div>
+    </div>
+  );
+}
+
+const MapInstanceNode = memo(function MapInstanceNode({ instance, selected, viewportBounds, previewPosition, quality, viewMode }: { instance: SessionMapInstance; selected: boolean; viewportBounds: VttRect; previewPosition?: VttPoint; quality: ProceduralRenderQuality; viewMode: 'gm' | 'player-preview' }) {
   const data = instance.data;
   const strokeWidth = selected ? 2.5 : 0;
   const x = previewPosition?.x ?? instance.x;
@@ -314,6 +420,7 @@ const MapInstanceNode = memo(function MapInstanceNode({ instance, selected, view
           keyPrefix={`instance:${instance.id}`}
           quality={quality}
           includeObjects
+          showLightAuras={viewMode === 'gm'}
         />
       ) : null}
       {selected ? (
@@ -347,7 +454,7 @@ const MapInstanceNode = memo(function MapInstanceNode({ instance, selected, view
 function HeldMapPreview({ map, point, zoom }: { map: OmniMap; point: VttPoint; zoom: number }) {
   return (
     <Group x={point.x} y={point.y} opacity={0.66} listening={false}>
-      <MapBody map={map} origin={{ x: 0, y: 0 }} selected={false} keyPrefix="held-map" quality="fast" includeObjects />
+      <MapBody map={map} origin={{ x: 0, y: 0 }} selected={false} keyPrefix="held-map" quality="fast" includeObjects showLightAuras />
       <Rect
         x={0}
         y={0}
@@ -397,7 +504,7 @@ function snapPointToGrid(point: VttPoint, gridSize: number) {
   };
 }
 
-const MapBody = memo(function MapBody({ map, origin, selected, viewportBounds, keyPrefix, quality, includeObjects = false }: { map: OmniMap; origin: VttPoint; selected: boolean; viewportBounds?: VttRect; keyPrefix: string; quality: ProceduralRenderQuality; includeObjects?: boolean }) {
+const MapBody = memo(function MapBody({ map, origin, selected, viewportBounds, keyPrefix, quality, includeObjects = false, showLightAuras = true }: { map: OmniMap; origin: VttPoint; selected: boolean; viewportBounds?: VttRect; keyPrefix: string; quality: ProceduralRenderQuality; includeObjects?: boolean; showLightAuras?: boolean }) {
   void selected;
   return (
     <Group x={origin.x} y={origin.y} listening={false}>
@@ -405,7 +512,7 @@ const MapBody = memo(function MapBody({ map, origin, selected, viewportBounds, k
       <TileLayerNode layer={map.tileLayers.walls} map={map} viewportBounds={viewportBounds} opacity={1} keyPrefix={keyPrefix} quality={quality} />
       <TileLayerNode layer={map.tileLayers.doors} map={map} viewportBounds={viewportBounds} opacity={1} keyPrefix={keyPrefix} quality={quality} />
       <TileLayerNode layer={map.tileLayers.collision} map={map} viewportBounds={viewportBounds} opacity={0.35} keyPrefix={keyPrefix} quality="fast" />
-      {includeObjects ? <ObjectLayer map={map} selectedKeys={EMPTY_SELECTED_KEYS} viewportBounds={viewportBounds} keyPrefix={`${keyPrefix}:object`} /> : null}
+      {includeObjects ? <ObjectLayer map={map} selectedKeys={EMPTY_SELECTED_KEYS} viewportBounds={viewportBounds} keyPrefix={`${keyPrefix}:object`} showLightAuras={showLightAuras} /> : null}
     </Group>
   );
 });
@@ -538,7 +645,7 @@ function fallbackAsset(layerKey: TileLayer['key'], assetId: string, width: numbe
   };
 }
 
-const ObjectLayer = memo(function ObjectLayer({ map, selectedKeys, viewportBounds, keyPrefix }: { map: OmniMap; selectedKeys: Set<string>; viewportBounds?: VttRect; keyPrefix: string }) {
+const ObjectLayer = memo(function ObjectLayer({ map, selectedKeys, viewportBounds, keyPrefix, showLightAuras = true }: { map: OmniMap; selectedKeys: Set<string>; viewportBounds?: VttRect; keyPrefix: string; showLightAuras?: boolean }) {
   const objects = useMemo(() => (
     getAllObjects(map)
       .filter((object) => isFiniteNumber(object.x) && isFiniteNumber(object.y))
@@ -553,13 +660,14 @@ const ObjectLayer = memo(function ObjectLayer({ map, selectedKeys, viewportBound
           object={object}
           asset={getAsset(object.assetId, map.tilesets)}
           selected={selectedKeys.has(`${object.kind === 'light' ? 'light' : 'object'}:${object.id}`)}
+          showLightAura={showLightAuras}
         />
       ))}
     </>
   );
 });
 
-const ObjectNode = memo(function ObjectNode({ object, asset, selected }: { object: MapObject; asset: Asset | null; selected: boolean }) {
+const ObjectNode = memo(function ObjectNode({ object, asset, selected, showLightAura }: { object: MapObject; asset: Asset | null; selected: boolean; showLightAura: boolean }) {
   const image = useLoadedImage(asset?.imageUrl || asset?.thumbnailUrl);
   const width = object.width * (object.scale || 1);
   const height = object.height * (object.scale || 1);
@@ -570,30 +678,140 @@ const ObjectNode = memo(function ObjectNode({ object, asset, selected }: { objec
       ) : (
         <ProceduralObject asset={asset} width={width} height={height} selected={selected} strokeWidth={selected ? 2 : 1} />
       )}
-      {object.kind === 'light' ? <Circle x={width / 2} y={height / 2} radius={Math.max(width, height) * 0.55} fill={asset?.color || '#fef3c7'} opacity={0.16} /> : null}
+      {showLightAura && object.kind === 'light' ? <Circle x={width / 2} y={height / 2} radius={Math.max(width, height) * 0.55} fill={asset?.color || '#fef3c7'} opacity={0.16} /> : null}
     </Group>
   );
 });
 
-function TokenLayer({ map, viewMode, selectedKeys, viewportBounds, previewPositions }: { map: OmniMap; viewMode: 'gm' | 'player-preview'; selectedKeys: Set<string>; viewportBounds: VttRect; previewPositions: Record<string, { x: number; y: number }> }) {
+function TokenLayer({
+  map,
+  viewMode,
+  tool,
+  selectedKeys,
+  viewportBounds,
+  onDebugChange
+}: {
+  map: OmniMap;
+  viewMode: 'gm' | 'player-preview';
+  tool: string;
+  selectedKeys: Set<string>;
+  viewportBounds: VttRect;
+  onDebugChange?: (state: TokenDragDebugState) => void;
+}) {
   return (
     <>
       {map.tokens
         .filter((token) => viewMode === 'gm' || (token.visibleToPlayers && !token.hidden))
-        .filter((token) => selectedKeys.has(`token:${token.id}`) || rectsIntersect(tokenBounds(map, token, previewPositions[token.id]), viewportBounds))
-        .map((token) => <TokenNode key={token.id} token={token} map={map} selected={selectedKeys.has(`token:${token.id}`)} previewPosition={previewPositions[token.id]} />)}
+        .filter((token) => selectedKeys.has(`token:${token.id}`) || rectsIntersect(tokenBounds(map, token), viewportBounds))
+        .map((token) => <TokenNode key={token.id} token={token} map={map} tool={tool} viewMode={viewMode} selected={selectedKeys.has(`token:${token.id}`)} onDebugChange={onDebugChange} />)}
     </>
   );
 }
 
-function TokenNode({ token, map, selected, previewPosition }: { token: TabletopToken; map: OmniMap; selected: boolean; previewPosition?: { x: number; y: number } }) {
+function TokenNode({
+  token,
+  map,
+  tool,
+  viewMode,
+  selected,
+  onDebugChange
+}: {
+  token: TabletopToken;
+  map: OmniMap;
+  tool: string;
+  viewMode: 'gm' | 'player-preview';
+  selected: boolean;
+  onDebugChange?: (state: TokenDragDebugState) => void;
+}) {
   const image = useLoadedImage(token.image);
+  const tabletopRole = useTabletopStore((state) => state.tabletopRole);
+  const currentUserId = useTabletopStore((state) => state.currentUserId);
+  const currentCharacterId = useTabletopStore((state) => state.currentCharacterId);
+  const ownedCharacterIds = useTabletopStore((state) => state.ownedCharacterIds);
   const size = map.gridSize * Math.max(0.5, token.size || 1);
-  const x = (previewPosition?.x ?? token.x) * map.gridSize;
-  const y = (previewPosition?.y ?? token.y) * map.gridSize;
+  const x = token.x;
+  const y = token.y;
   const color = token.color || (token.kind === 'enemy' ? '#fb7185' : token.kind === 'npc' ? '#fbbf24' : token.kind === 'creature' ? '#a78bfa' : '#60a5fa');
+  const canControl = canControlTokenForUser(token, {
+    role: tabletopRole,
+    id: currentUserId,
+    characterId: currentCharacterId,
+    characterIds: ownedCharacterIds
+  });
+  const gmCanOverrideLock = tabletopRole === 'gm' || viewMode === 'gm';
+  const canDragToken = map.mode === 'session'
+    && (tool === 'select' || tool === 'move-token')
+    && canControl
+    && (!token.locked || gmCanOverrideLock);
+
+  function selectCurrentToken(event: { cancelBubble: boolean; evt?: MouseEvent | TouchEvent | PointerEvent }) {
+    event.cancelBubble = true;
+    useTabletopStore.getState().selectEntity({ type: 'token', id: token.id }, isAdditivePointer(event.evt));
+    onDebugChange?.({
+      selectedTokenId: token.id,
+      canDragToken,
+      canControlToken: canControl,
+      nodeX: token.x,
+      nodeY: token.y,
+      collisionResult: useTabletopStore.getState().lastTokenMoveCheck
+    });
+  }
+
   return (
-    <Group x={x} y={y} listening={false}>
+    <Group
+      x={x}
+      y={y}
+      listening
+      draggable={canDragToken}
+      onPointerDown={selectCurrentToken}
+      onDragStart={(event) => {
+        event.cancelBubble = true;
+        useTabletopStore.getState().selectEntity({ type: 'token', id: token.id }, false);
+        onDebugChange?.({
+          selectedTokenId: token.id,
+          draggingTokenId: token.id,
+          canDragToken,
+          canControlToken: canControl,
+          nodeX: event.currentTarget.x(),
+          nodeY: event.currentTarget.y(),
+          lastDragStart: new Date().toLocaleTimeString()
+        });
+      }}
+      onDragMove={(event) => {
+        event.cancelBubble = true;
+        onDebugChange?.({
+          selectedTokenId: token.id,
+          draggingTokenId: token.id,
+          canDragToken,
+          canControlToken: canControl,
+          nodeX: event.currentTarget.x(),
+          nodeY: event.currentTarget.y()
+        });
+      }}
+      onDragEnd={(event) => {
+        event.cancelBubble = true;
+        const x = event.currentTarget.x();
+        const y = event.currentTarget.y();
+        const state = useTabletopStore.getState();
+        state.moveToken(token.id, x, y);
+        const collisionResult = useTabletopStore.getState().lastTokenMoveCheck;
+        onDebugChange?.({
+          selectedTokenId: token.id,
+          draggingTokenId: undefined,
+          canDragToken,
+          canControlToken: canControl,
+          nodeX: x,
+          nodeY: y,
+          lastDragEnd: new Date().toLocaleTimeString(),
+          lastMoveTokenCalled: true,
+          lastMoveTokenPayload: { tokenId: token.id, x, y },
+          collisionResult
+        });
+        if (collisionResult && !collisionResult.ok) {
+          event.currentTarget.position({ x: token.x, y: token.y });
+        }
+      }}
+    >
       {image ? (
         <KonvaImage image={image} width={size} height={size} cornerRadius={size / 2} />
       ) : (
@@ -606,6 +824,10 @@ function TokenNode({ token, map, selected, previewPosition }: { token: TabletopT
       {token.hidden ? <Circle x={size - 8} y={8} radius={5} fill="#f87171" /> : null}
     </Group>
   );
+}
+
+function isAdditivePointer(event: MouseEvent | TouchEvent | PointerEvent | undefined) {
+  return Boolean(event && 'shiftKey' in event && (event.shiftKey || event.ctrlKey || event.metaKey));
 }
 
 function TemplateLayer({ map, selectedKeys }: { map: OmniMap; selectedKeys: Set<string> }) {
@@ -751,11 +973,11 @@ function getObjectRect(object: MapObject): VttRect {
   };
 }
 
-function tokenBounds(map: OmniMap, token: TabletopToken, previewPosition?: { x: number; y: number }): VttRect {
+function tokenBounds(map: OmniMap, token: TabletopToken): VttRect {
   const size = map.gridSize * Math.max(0.5, token.size || 1);
   return {
-    x: (previewPosition?.x ?? token.x) * map.gridSize,
-    y: (previewPosition?.y ?? token.y) * map.gridSize,
+    x: token.x,
+    y: token.y,
     width: size,
     height: size
   };

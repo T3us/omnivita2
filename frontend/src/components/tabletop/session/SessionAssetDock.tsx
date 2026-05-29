@@ -86,7 +86,7 @@ export function SessionAssetDock({
   }
 
   function spawnToken(token: AvailableTabletopToken) {
-    addToken(token, Math.floor(map.width / 2), Math.floor(map.height / 2));
+    addToken(token, (map.width * map.gridSize) / 2, (map.height * map.gridSize) / 2);
     setTool('select');
   }
 

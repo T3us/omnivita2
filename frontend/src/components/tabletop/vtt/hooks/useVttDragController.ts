@@ -8,6 +8,8 @@ export type VttDragPreview = {
   tokenPositions: Record<string, { x: number; y: number }>;
   mapPositions: Record<string, { x: number; y: number }>;
   commitCount: number;
+  draggedTokenId: string | null;
+  lastMoveCommitted: boolean;
 };
 
 export type VttDragSnapshot = {
@@ -25,18 +27,21 @@ const EMPTY_PREVIEW: VttDragPreview = {
   delta: { x: 0, y: 0 },
   tokenPositions: {},
   mapPositions: {},
-  commitCount: 0
+  commitCount: 0,
+  draggedTokenId: null,
+  lastMoveCommitted: false
 };
 
 export function useVttDragController() {
   const snapshotRef = useRef<VttDragSnapshot | null>(null);
   const [preview, setPreview] = useState<VttDragPreview>(EMPTY_PREVIEW);
+  const [lastMoveCommitted, setLastMoveCommitted] = useState(false);
 
   function start(activeEntity: SessionSelectedEntity, world: VttPoint) {
     const state = useTabletopStore.getState();
     const activeKey = entityKey(activeEntity);
     const activeIsSelected = state.selectedEntities.some((entity) => entityKey(entity) === activeKey);
-    const selectedEntities = activeIsSelected && state.selectedEntities.length ? state.selectedEntities : [activeEntity];
+    const selectedEntities = getDragSelection(activeEntity, activeIsSelected ? state.selectedEntities : []);
     const selectedTokenIds = new Set(selectedEntities.filter((entity) => entity.type === 'token').map((entity) => entity.id));
     const selectedMapIds = new Set(selectedEntities.filter((entity) => entity.type === 'map').map((entity) => entity.id));
     snapshotRef.current = {
@@ -53,7 +58,8 @@ export function useVttDragController() {
         .map((instance) => [instance.id, { x: instance.x, y: instance.y }])),
       moved: false
     };
-    setPreview(EMPTY_PREVIEW);
+    setLastMoveCommitted(false);
+    setPreview({ ...EMPTY_PREVIEW, draggedTokenId: activeEntity.type === 'token' ? activeEntity.id : null });
   }
 
   function update(world: VttPoint, threshold = 4) {
@@ -62,28 +68,33 @@ export function useVttDragController() {
     const totalDx = world.x - snapshot.pointerStart.x;
     const totalDy = world.y - snapshot.pointerStart.y;
     if (!snapshot.moved && Math.hypot(totalDx, totalDy) < threshold) return false;
-    const state = useTabletopStore.getState();
-    const gridSize = Math.max(1, state.map.gridSize);
-    const snapsToGrid = snapshot.selectedEntities.some((entity) => entity.type === 'token');
-    const targetDelta = snapsToGrid
-      ? { x: Math.round(totalDx / gridSize) * gridSize, y: Math.round(totalDy / gridSize) * gridSize }
-      : { x: totalDx, y: totalDy };
+    const targetDelta = { x: totalDx, y: totalDy };
     if (targetDelta.x === snapshot.appliedDelta.x && targetDelta.y === snapshot.appliedDelta.y) return snapshot.moved;
     snapshot.appliedDelta = targetDelta;
     snapshot.lastWorld = world;
     snapshot.moved = true;
-    setPreview(buildPreview(snapshot, gridSize));
+    setPreview(buildPreview(snapshot));
     return true;
   }
 
   function finish() {
     const snapshot = snapshotRef.current;
     const moved = Boolean(snapshot?.moved);
+    let committed = false;
     if (snapshot?.moved && (snapshot.appliedDelta.x || snapshot.appliedDelta.y)) {
-      useTabletopStore.getState().moveSelectedSessionItems(snapshot.appliedDelta.x, snapshot.appliedDelta.y);
+      const state = useTabletopStore.getState();
+      const finalPreview = buildPreview(snapshot);
+      if (snapshot.activeEntity.type === 'token' && Object.keys(finalPreview.tokenPositions).length) {
+        state.moveTokensTo(finalPreview.tokenPositions);
+        committed = true;
+      } else {
+        state.moveSelectedSessionItems(snapshot.appliedDelta.x, snapshot.appliedDelta.y);
+        committed = true;
+      }
     }
     snapshotRef.current = null;
     setPreview(EMPTY_PREVIEW);
+    setLastMoveCommitted(committed);
     return moved;
   }
 
@@ -92,23 +103,27 @@ export function useVttDragController() {
     setPreview(EMPTY_PREVIEW);
   }
 
-  return { snapshotRef, preview, start, update, finish, cancel };
+  return { snapshotRef, preview, lastMoveCommitted, start, update, finish, cancel };
 }
 
 function entityKey(entity: SessionSelectedEntity) {
   return `${entity.type}:${entity.id}`;
 }
 
-function buildPreview(snapshot: VttDragSnapshot, gridSize: number): VttDragPreview {
-  const tokenDeltaCells = {
-    x: Math.round(snapshot.appliedDelta.x / Math.max(1, gridSize)),
-    y: Math.round(snapshot.appliedDelta.y / Math.max(1, gridSize))
-  };
+function getDragSelection(activeEntity: SessionSelectedEntity, selectedEntities: SessionSelectedEntity[]) {
+  if (activeEntity.type === 'token') {
+    const selectedTokens = selectedEntities.filter((entity) => entity.type === 'token');
+    return selectedTokens.some((entity) => entity.id === activeEntity.id) ? selectedTokens : [activeEntity];
+  }
+  return selectedEntities.length ? selectedEntities : [activeEntity];
+}
+
+function buildPreview(snapshot: VttDragSnapshot): VttDragPreview {
   const tokenPositions = Object.fromEntries(Object.entries(snapshot.tokenStarts).map(([id, point]) => [
     id,
     {
-      x: Math.round(point.x + tokenDeltaCells.x),
-      y: Math.round(point.y + tokenDeltaCells.y)
+      x: point.x + snapshot.appliedDelta.x,
+      y: point.y + snapshot.appliedDelta.y
     }
   ]));
   const mapPositions = Object.fromEntries(Object.entries(snapshot.mapStarts).map(([id, point]) => [
@@ -122,6 +137,8 @@ function buildPreview(snapshot: VttDragSnapshot, gridSize: number): VttDragPrevi
     delta: snapshot.appliedDelta,
     tokenPositions,
     mapPositions,
-    commitCount: Object.keys(tokenPositions).length + Object.keys(mapPositions).length
+    commitCount: Object.keys(tokenPositions).length + Object.keys(mapPositions).length,
+    draggedTokenId: snapshot.activeEntity.type === 'token' ? snapshot.activeEntity.id : null,
+    lastMoveCommitted: false
   };
 }

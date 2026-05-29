@@ -23,7 +23,7 @@ export function TokenPanel({ tokens }: { tokens: AvailableTabletopToken[] }) {
   });
 
   function spawnToken(source: AvailableTabletopToken) {
-    addToken(source, Math.floor(map.width / 2), Math.floor(map.height / 2));
+    addToken(source, (map.width * map.gridSize) / 2, (map.height * map.gridSize) / 2);
     setTool('select');
   }
 

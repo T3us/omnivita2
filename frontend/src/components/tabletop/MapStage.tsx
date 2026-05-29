@@ -838,8 +838,8 @@ function TokenShape({
   return (
     <Group
       name="map-token"
-      x={token.x * size}
-      y={token.y * size}
+      x={token.x}
+      y={token.y}
       draggable={draggable}
       opacity={token.hidden ? 0.45 : 1}
       onMouseDown={(event) => {
@@ -850,7 +850,7 @@ function TokenShape({
         event.cancelBubble = true;
         onSelect(token.id);
       }}
-      onDragEnd={(event) => onMove(token.id, event.target.x() / size, event.target.y() / size)}
+      onDragEnd={(event) => onMove(token.id, event.target.x(), event.target.y())}
     >
       <Circle
         x={visualSize / 2}

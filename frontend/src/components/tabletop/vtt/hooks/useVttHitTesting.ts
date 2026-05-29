@@ -102,7 +102,7 @@ function isTokenVisible(token: TabletopToken, viewMode: 'gm' | 'player-preview')
 
 function tokenBounds(map: OmniMap, token: TabletopToken): VttRect {
   const size = map.gridSize * Math.max(0.5, token.size || 1);
-  return { x: token.x * map.gridSize, y: token.y * map.gridSize, width: size, height: size };
+  return { x: token.x, y: token.y, width: size, height: size };
 }
 
 function baseMapBounds(map: OmniMap): VttRect {

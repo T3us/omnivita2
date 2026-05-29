@@ -143,6 +143,8 @@ export function canControlSessionToken(user, token = {}) {
   if (role === 'master' || role === 'gm') return true;
   if (token.locked) return false;
   if (token.hidden || token.visibleToPlayers === false) return false;
+  // Temporary tabletop rule: players may move visible tokens while ownership is being stabilized.
+  return true;
   const userId = String(user?.id || '');
   const characterId = String(user?.characterId || '');
   const controlledBy = Array.isArray(token.controlledByUserIds) ? token.controlledByUserIds.map(String) : [];
@@ -201,9 +203,10 @@ export function moveSessionTokenOnBoard(board, tokenId, x, y, user) {
   const token = safeArray(next.activeMap.tokens).find((entry) => String(entry.id) === String(tokenId));
   if (!token) return { ok: false, reason: 'missing-token' };
   if (!canControlSessionToken(user, token)) return { ok: false, reason: 'permission' };
-  token.x = Math.round(Number(x || 0));
-  token.y = Math.round(Number(y || 0));
-  next.tokens = safeArray(next.tokens).map((entry) => String(entry.id) === String(tokenId) ? { ...entry, x: token.x, y: token.y } : entry);
+  token.x = Number.isFinite(Number(x)) ? Number(x) : token.x;
+  token.y = Number.isFinite(Number(y)) ? Number(y) : token.y;
+  token.positionMode = 'world';
+  next.tokens = safeArray(next.tokens).map((entry) => String(entry.id) === String(tokenId) ? { ...entry, x: token.x, y: token.y, positionMode: 'world' } : entry);
   return { ok: true, board: next, token };
 }
 

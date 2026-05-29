@@ -346,8 +346,11 @@ export interface TabletopToken {
   nameOverride?: string;
   image?: string;
   color?: string;
+  /** World-pixel top-left position on the tabletop canvas. Tokens are not grid cells. */
   x: number;
+  /** World-pixel top-left position on the tabletop canvas. Tokens are not grid cells. */
   y: number;
+  positionMode?: 'world';
   controlledBy?: string;
   ownerUserId?: string;
   ownerCharacterId?: string;

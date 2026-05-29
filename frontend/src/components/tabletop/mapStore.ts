@@ -158,6 +158,7 @@ interface TabletopStore {
   removePrefab(prefabId: string): void;
   addToken(source: AvailableTabletopToken, x: number, y: number): void;
   moveToken(tokenId: string, x: number, y: number): void;
+  moveTokensTo(positions: Record<string, { x: number; y: number }>): void;
   moveSelectedTokens(deltaX: number, deltaY: number): void;
   updateToken(tokenId: string, patch: Partial<TabletopToken>): void;
   updateSelectedTokens(patch: Partial<TabletopToken>): void;
@@ -1309,7 +1310,7 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         isFormToken: Boolean(source.isFormToken),
         isMiniSheetToken: Boolean(source.isMiniSheetToken),
         isSummonToken: Boolean(source.isSummonToken),
-        blocksMovement: source.blocksMovement ?? source.kind === 'enemy',
+        blocksMovement: source.blocksMovement ?? false,
         kind: source.kind,
         name: source.name,
         image: source.image,
@@ -1320,8 +1321,9 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         peMax: undefined,
         pdCurrent: undefined,
         pdMax: undefined,
-        x: Math.round(x),
-        y: Math.round(y),
+        x: Number(x) || 0,
+        y: Number(y) || 0,
+        positionMode: 'world',
         visibleToPlayers: source.visibleToPlayers !== false,
         locked: Boolean(source.locked),
         hidden: Boolean(source.hidden),
@@ -1334,7 +1336,11 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         lightRadius: source.lightRadius ?? 0,
         auraColor: source.auraColor,
         statusMarkers: source.statusMarkers || [],
-        attachedToMapInstanceId: findMapInstanceAtWorldPoint(next, Math.round(x) * next.gridSize + next.gridSize / 2, Math.round(y) * next.gridSize + next.gridSize / 2)?.id
+        attachedToMapInstanceId: findMapInstanceAtWorldPoint(
+          next,
+          (Number(x) || 0) + next.gridSize * Math.max(0.5, source.size || 1) / 2,
+          (Number(y) || 0) + next.gridSize * Math.max(0.5, source.size || 1) / 2
+        )?.id
       };
       next.tokens.push(token);
       markExploredAroundToken(next, token);
@@ -1348,14 +1354,51 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const next = cloneMap(state.map);
       const token = next.tokens.find((entry) => entry.id === tokenId);
       if (!token) return state;
-      const nextX = Math.round(x);
-      const nextY = Math.round(y);
+      const nextX = Number.isFinite(Number(x)) ? Number(x) : token.x;
+      const nextY = Number.isFinite(Number(y)) ? Number(y) : token.y;
       const check = canMoveTokenToState(state, next, token, nextX, nextY);
       if (!check.ok) return { ...state, lastTokenMoveCheck: check };
       token.x = nextX;
       token.y = nextY;
+      token.positionMode = 'world';
       markExploredAroundToken(next, token);
       return { map: next, lastTokenMoveCheck: check, historyPast: history.historyPast, historyFuture: history.historyFuture, dirty: true };
+    });
+  },
+
+  moveTokensTo(positions) {
+    const entries = Object.entries(positions);
+    if (!entries.length) return;
+    set((state) => {
+      const history = pushHistory(state);
+      const next = cloneMap(state.map);
+      let moved = false;
+      let lastTokenMoveCheck: TokenMoveCheck | null = null;
+
+      entries.forEach(([tokenId, point]) => {
+        const token = next.tokens.find((entry) => entry.id === tokenId);
+        if (!token) return;
+        const nextX = Number.isFinite(Number(point.x)) ? Number(point.x) : token.x;
+        const nextY = Number.isFinite(Number(point.y)) ? Number(point.y) : token.y;
+        const check = canMoveTokenToState(state, next, token, nextX, nextY);
+        lastTokenMoveCheck = check;
+        if (!check.ok) return;
+        if (token.x === nextX && token.y === nextY) return;
+        token.x = nextX;
+        token.y = nextY;
+        token.positionMode = 'world';
+        moved = true;
+        markExploredAroundToken(next, token);
+      });
+
+      if (!moved) return lastTokenMoveCheck ? { ...state, lastTokenMoveCheck } : state;
+      return {
+        map: next,
+        lastTokenMoveCheck,
+        historyPast: history.historyPast,
+        historyFuture: history.historyFuture,
+        dirty: true
+      };
     });
   },
 
@@ -1368,8 +1411,8 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       state.selectedTokenIds.forEach((tokenId) => {
         const token = next.tokens.find((entry) => entry.id === tokenId);
         if (!token) return;
-        const nextX = Math.round(token.x + deltaX);
-        const nextY = Math.round(token.y + deltaY);
+        const nextX = token.x + deltaX;
+        const nextY = token.y + deltaY;
         const check = canMoveTokenToState(state, next, token, nextX, nextY);
         if (!check.ok) {
           lastTokenMoveCheck = check;
@@ -1825,8 +1868,6 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
       const selectedRegions = new Set(state.selectedRegionIds);
       const selectedTokens = new Set(state.selectedTokenIds);
       const selectedTemplates = new Set(state.selectedEntities.filter((entity) => entity.type === 'template').map((entity) => entity.id));
-      const tokenDeltaX = Math.round(deltaX / Math.max(1, next.gridSize));
-      const tokenDeltaY = Math.round(deltaY / Math.max(1, next.gridSize));
       let lastTokenMoveCheck: TokenMoveCheck | null = null;
 
       next.sessionMapInstances = (next.sessionMapInstances || []).map((instance) => (
@@ -1871,13 +1912,13 @@ export const useTabletopStore = create<TabletopStore>((set, get) => ({
         });
       }
 
-      if (tokenDeltaX || tokenDeltaY) {
+      if (deltaX || deltaY) {
         next.tokens.forEach((token) => {
           const attachedToMovedMap = Boolean(token.attachedToMapInstanceId && selectedMapInstances.has(token.attachedToMapInstanceId));
           if (!selectedTokens.has(token.id) && !attachedToMovedMap) return;
           const target = {
-            x: Math.round(token.x + tokenDeltaX),
-            y: Math.round(token.y + tokenDeltaY)
+            x: token.x + deltaX,
+            y: token.y + deltaY
           };
           const check = canMoveTokenToState(state, next, token, target.x, target.y);
           if (!check.ok) {
@@ -2034,7 +2075,7 @@ function normalizeToolForMode(tool: MapTool, mode: TabletopMode, role: TabletopR
 export function canControlTokenForUser(token: TabletopToken, user: { role?: string; id?: string; characterId?: string; characterIds?: string[] }) {
   if (user.role === 'gm' || user.role === 'master') return true;
   if (token.locked) return false;
-  if (!token.visibleToPlayers || token.hidden) return false;
+  if (token.visibleToPlayers === false || token.hidden) return false;
   // TODO(player-permissions): restrict players to owned tokens/forms/mini sheets once the Player Tabletop flow is stable.
   if (temporaryPlayerTokenMoveUnlocked()) return true;
   const userId = String(user.id || '');
@@ -2101,7 +2142,13 @@ function eraseCells(map: OmniMap, x: number, y: number, size: number, mode: Eras
     const allLayers: MapLayerKey[] = ['floor', 'walls', 'doors', 'collision', 'decoration', 'objects', 'details', 'lighting', 'mechanics', 'notes', 'fog'];
     allLayers.forEach((layer) => eraseLayerCells(map, layer, cells));
     const keys = new Set(cells.map((cell) => `${cell.x}:${cell.y}`));
-    map.tokens = map.tokens.filter((token) => token.locked || !keys.has(`${token.x}:${token.y}`));
+    map.tokens = map.tokens.filter((token) => {
+      if (token.locked) return true;
+      const bounds = getTokenBounds(map, token);
+      const cellX = Math.floor((bounds.x + bounds.width / 2) / map.gridSize);
+      const cellY = Math.floor((bounds.y + bounds.height / 2) / map.gridSize);
+      return !keys.has(`${cellX}:${cellY}`);
+    });
     return;
   }
   cells.forEach((cell) => eraseTopVisibleCell(map, cell));
@@ -2312,12 +2359,12 @@ function getSessionSelectableObjects(map: OmniMap) {
 }
 
 function getTokenBounds(map: OmniMap, token: TabletopToken) {
-  const size = Math.max(1, Number(token.size || 1));
+  const size = map.gridSize * Math.max(0.5, Number(token.size || 1));
   return {
-    x: token.x * map.gridSize,
-    y: token.y * map.gridSize,
-    width: size * map.gridSize,
-    height: size * map.gridSize
+    x: token.x,
+    y: token.y,
+    width: size,
+    height: size
   };
 }
 
@@ -2387,8 +2434,8 @@ export function canMoveTokenTo(
   options: { ignoreTokenId?: string; ignoreCollision?: boolean; ignoreLocked?: boolean; checkOtherTokens?: boolean } = {}
 ): TokenMoveCheck {
   if (token.locked && !options.ignoreLocked) return buildTokenMoveCheck(token, x, y, false, 'locked');
-  const nextX = Math.round(x);
-  const nextY = Math.round(y);
+  const nextX = Number.isFinite(Number(x)) ? Number(x) : token.x;
+  const nextY = Number.isFinite(Number(y)) ? Number(y) : token.y;
   if (options.ignoreCollision) return buildTokenMoveCheck(token, nextX, nextY, true);
   const path = canMoveTokenAlongBoardPath(map, token, { x: token.x, y: token.y }, { x: nextX, y: nextY }, options);
   if (!path.valid) {
@@ -2562,9 +2609,13 @@ function getMovementIndex(map: OmniMap): MovementIndex {
   });
   map.tokens.forEach((token) => {
     if (token.hidden || token.visibleToPlayers === false || !token.blocksMovement) return;
-    const size = Math.max(1, Number(token.size || 1));
-    for (let y = token.y; y < token.y + size; y += 1) {
-      for (let x = token.x; x < token.x + size; x += 1) {
+    const bounds = getTokenBounds(map, token);
+    const minX = Math.floor(bounds.x / map.gridSize);
+    const minY = Math.floor(bounds.y / map.gridSize);
+    const maxX = Math.ceil((bounds.x + bounds.width) / map.gridSize) - 1;
+    const maxY = Math.ceil((bounds.y + bounds.height) / map.gridSize) - 1;
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
         const key = cellKey(x, y);
         index.tokensByCell.set(key, [...(index.tokensByCell.get(key) || []), token.id]);
       }
@@ -2649,11 +2700,16 @@ function applyDoorState(door: TileCell, doorState: NonNullable<TileCell['doorSta
 function markExploredAroundToken(map: OmniMap, token: TabletopToken) {
   if (token.visionEnabled === false || token.hidden) return;
   const radius = Math.max(1, Math.round(token.visionRadius || 6));
+  const bounds = getTokenBounds(map, token);
+  const center = {
+    x: Math.floor((bounds.x + bounds.width / 2) / map.gridSize),
+    y: Math.floor((bounds.y + bounds.height / 2) / map.gridSize)
+  };
   const explored = new Set(map.fogLayer.revealedCells.map((cell) => `${cell.x}:${cell.y}`));
-  for (let y = token.y - radius; y <= token.y + radius; y += 1) {
-    for (let x = token.x - radius; x <= token.x + radius; x += 1) {
+  for (let y = center.y - radius; y <= center.y + radius; y += 1) {
+    for (let x = center.x - radius; x <= center.x + radius; x += 1) {
       if (!isInsideCell(map, x, y)) continue;
-      if (Math.hypot(x - token.x, y - token.y) > radius) continue;
+      if (Math.hypot(x - center.x, y - center.y) > radius) continue;
       const key = `${x}:${y}`;
       if (explored.has(key)) continue;
       explored.add(key);
